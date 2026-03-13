@@ -1,5 +1,23 @@
 #include <Arduino.h>
 #include <Wire.h>
+#include "interrupt.h"
+
+void setup() {
+  init();
+}
+
+void loop(){
+  if(starting){
+    start();
+  }
+  if(flag){
+    response();
+  }
+}
+
+
+/*#include <Arduino.h>
+#include <Wire.h>
 
 #define EXTADD 0x20
 #define IODIR 0x00
@@ -7,7 +25,6 @@
 #define SDA 21
 #define OLAT 0x0A
 #define GPIO 0x09
-
 void setup() {
   Wire.begin(SDA, SCL);
   Serial.begin(115200);
@@ -30,4 +47,4 @@ void loop() {
   Wire.endTransmission();
   Serial.println("0");
   delay(1000);
-}
+}*/
