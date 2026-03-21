@@ -39,7 +39,8 @@ class MCP23008 {
         MCP23008() = default;
         bool init(SemaphoreHandle_t i2cMutex);
         bool init(SemaphoreHandle_t i2cMutex,uint8_t interrupt_pin, uint8_t address);
-        void setUpdateCallback(void (*callback)(uint8_t), void *context=nullptr); // This allows the user to set a callback function that will be called whenever an interrupt occurs
+        void setUpdateCallback(void (*callback)(void*, uint8_t), void *context); // This allows the user to set a callback function that will be called whenever an interrupt occurs
+        void setUpdateCallback(void (*callback)(uint8_t));
         void pinMode_stage(uint8_t pin, PIN_TYPE type); // This allows us to stage a bunch of changes to reduce i2c transactions
         void write_stage(uint8_t pin, bool value); // This allows us to stage a bunch of changes to reduce i2c transactions
         void commit(bool force = false); // This will send the staged changes over i2c
@@ -75,7 +76,8 @@ class MCP23008 {
 
         //user supplied function for when a button is pressed, gets the current state of the inputs as an argument 
         void (*_updateCallback)(uint8_t) = nullptr;
-        void *updateContext = nullptr; // This can be used to store any context the user wants to pass to the callback function, it will be passed as an argument to the callback function when it is called
+        void (*_updateCallbackClass)(void*, uint8_t) = nullptr;
+        void *_updateContext = nullptr; // This can be used to store any context the user wants to pass to the callback function, it will be passed as an argument to the callback function when it is called
         //Task for reading and calling user function
         TaskHandle_t i2cTaskHandle = NULL;
 };

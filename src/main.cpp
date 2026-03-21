@@ -55,7 +55,9 @@ bool rideCycleHandler(unsigned long timer_value) {
 // TODO: POST IS GONNA NEED TO BE A TASK THAT SHOULD HAVE PRIORITY OVER LOOP IT WONT RETURN ANYTHING (OR AT ALL)
 // IT SHOULD START THE HEARTBEAT PERFROM A BUNCH OF CHECKS USE vTaskDelayUntil TO MAKE SURE ESP_H HAS TIME TO BOOT AND RESPOND
 // THEN IT CAN SWITCH STATES TO STOP IF EVERYTHING CHECKS OUT, OR LEAVE US IN ESTOP IF NOT. 
-void POST_task(){
+TaskHandle_t POST_task_handle = NULL;
+
+void POST_task(void* pvParameters){
   while(true){
 
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // The callback for reset should notify this task
@@ -72,7 +74,7 @@ void POST_task(){
     // if everything checks out, transition to STOP, otherwise stay in ESTOP
     
     //FOR TESTING
-    vtaskDelay(3000 / portTICK_PERIOD_MS); 
+    vTaskDelay(3000 / portTICK_PERIOD_MS); 
     current_state = State::STOP; 
   }
 }
@@ -88,7 +90,7 @@ void IRAM_ATTR reset_isr(){
     }
 }
 
-TaskHandle_t POST_task_handle = NULL;
+// TODO: Add Ian's class(es) and drive the 2 lower motors
 
 void setup() {
     Serial.begin(115200);
@@ -97,15 +99,14 @@ void setup() {
         POST_task, // Function to implement the task
         "POST Task", // Name of the task
         4096, // Stack size in words
-        NULL, // Task input parameter
+        nullptr, // Task input parameter
         3, // Priority higher than loop
         &POST_task_handle, // Task handle so we can send notifications to it
         1 // Run on core 1 to keep it separate from the control panel which runs mostly on core 0
     );
     // Set up controll panel interrupts
     controlPanel.setResetCallback(reset_isr); // Set the reset callback to the reset_isr function 
-    controlPanel.setPowerCallback(estop_isr); // Set the power callback to the estop_isr function (power = estop because category 0)
-    // TODO: Set up other callbacks for the control panel (limits, extender inputs, etc)
+    // TODO: Set up input callback
 
 
     //ride_cycle_timer setup
@@ -121,43 +122,45 @@ void setup() {
 void loop() {
     // TODO: Implement safety checks that can pull the state into ESTOP (Current monitoring, diag pins, etc.)
 
+    // TODO: Move state_switching logic to the callbacks
     switch (current_state) {
         case State::STOP:
             Serial.println("Currently in STOP state");
-            if (dispatch_pressed) {
-                current_state = State::NORMAL;
-                Serial.println("Transitioning to NORMAL state");
-                //restart the ride cycle timer
-                timerRestart(ride_cycle_timer); 
-                timerAlarm(ride_cycle_timer, RIDE_CYCLE_TIME * 1000, false, 0); // Set the timer to trigger at the end of every ride cycle and not auto-reload
-                timerStart(ride_cycle_timer); 
-            }
+            // if (dispatch_pressed) {
+            //     current_state = State::NORMAL;
+            //     Serial.println("Transitioning to NORMAL state");
+            //     //restart the ride cycle timer
+            //     timerRestart(ride_cycle_timer); 
+            //     timerAlarm(ride_cycle_timer, RIDE_CYCLE_TIME * 1000, false, 0); // Set the timer to trigger at the end of every ride cycle and not auto-reload
+            //     timerStart(ride_cycle_timer); 
+            // }
             break;
         case State::NORMAL:
             Serial.println("Currently in NORMAL state");
-            if(!rideCycleHandler(timerRead(ride_cycle_timer))){ // This checks if the ride cycle timer has reached the end of the ride cycle, and if so, it will transition back to STOP state. This is a non-blocking way to handle the ride cycle timing.
-                current_state = State::STOP;
-                Serial.println("Ride cycle ended, transitioning back to STOP state");
-            }
+            // if(!rideCycleHandler(timerRead(ride_cycle_timer))){ // This checks if the ride cycle timer has reached the end of the ride cycle, and if so, it will transition back to STOP state. This is a non-blocking way to handle the ride cycle timing.
+            //     current_state = State::STOP;
+            //     Serial.println("Ride cycle ended, transitioning back to STOP state");
+            // }
             break;
         case State::ESTOP:
             Serial.println("Currently in ESTOP state");
-            analogWrite(ESTOP_LED_PIN, 50); // Turn on the ESTOP LED 
-            if (reset_cycles > RESET_MIN_CYCLES){ // This is the amount of time the button must be held divided by the loop delay time (+10 for the debounce delay) to determine how many cycles the button needs to be held for
-                reset_cycles = 0; // Reset the cycle count after transitioning to STOP state
-                if(POST()){
-                    current_state = State::STOP;
-                    Serial.println("Transitioning to STOP state");
-                }else{
-                    Serial.println("POST failed, remaining in ESTOP state");
-                }
-            }
+            // TODO: change the analog write to be a function call to the control panel class 
+
+            //analogWrite(ESTOP_LED_PIN, 50); // Turn on the ESTOP LED 
+            // if (reset_cycles > RESET_MIN_CYCLES){ // This is the amount of time the button must be held divided by the loop delay time (+10 for the debounce delay) to determine how many cycles the button needs to be held for
+            //     reset_cycles = 0; // Reset the cycle count after transitioning to STOP state
+            //     if(POST()){
+            //         current_state = State::STOP;
+            //         Serial.println("Transitioning to STOP state");
+            //     }else{
+            //         Serial.println("POST failed, remaining in ESTOP state");
+            //     }
+            // }
             break;
         case State::MAINTENANCE:
             Serial.println("Currently in MAINTENANCE state");
             break;
     }
-    delay(LOOP_DELAY_TIME); // This delay is to control the loop timing, it should be short enough to keep the system responsive but long enough to prevent excessive CPU usage. It also helps with debouncing the buttons by providing a consistent time interval for checking button states.
 }
 
 // SemaphoreHandle_t i2cMutex;

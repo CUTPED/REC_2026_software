@@ -7,7 +7,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include "MCP23008.h"
-#include "dfrobot/DFRobot_RGBLCD1602.h"
+#include "DFRobot_RGBLCD1602.h"
 
 // I2C
 #define SCL 22
@@ -88,13 +88,14 @@
 class ControlPanel {
     public:
         ControlPanel() = default;
-        bool init(); // TODO
+        bool init(); 
         uint16_t getState(); 
         void setDisplayText(const char* text,bool force = false); // This will set the text to be displayed on the LCD, if force is true it will update the display immediately, otherwise it will compare to the cached display text and only update if it has changed to reduce I2C traffic
         void setInputCallback(void (*callback)(uint16_t)); // This will be called as an ISR when any of the inputs change state and get the whole state (it is not an ISR for extended inputs)
         void setResetCallback(void (*callback)()); // This will be called when the reset button is held down. In principle this should be set to the POST function 
         bool setResetHoldTime(uint16_t time_ms); // This will set the amount of time the reset button needs to be held down to trigger the reset callback
-
+        //TODO: handle LED outputs
+        void inputISR(); // This will be called when inputs change state, it will update the state variable and call the user input callback if set 
 
     private:
         DFRobot_RGBLCD1602 _lcd{RGB_ADD, 16, 2, &Wire, LCD_ADD};
@@ -105,11 +106,11 @@ class ControlPanel {
         //For these variables a 0 represents a button that is pressed or a limit switch that is triggered, and a 1 represents a button that is not pressed or a limit switch that is not triggered
         uint16_t volatile _state; 
         uint16_t volatile _prevState; // This will store the previous state to detect changes
-        String _displayText; // This will store the current text to be displayed on the LCD 
+        char *_displayText; // This will store the current text to be displayed on the LCD 
 
         uint16_t _resetHoldTime = 3000; // Default to 3 seconds, this is the amount of time the reset button needs to be held down to trigger the reset callback
         hw_timer_t *_resetTimer;
-
+        
         static void normalCallbackTrampoline(void* context, uint8_t state); 
         void normalExtenderCallback(uint8_t state);
 
@@ -119,7 +120,6 @@ class ControlPanel {
         static void resetTimerTrampoline(void* arg);
         void resetCallback();
         static void ISRtrampoline(void* arg);
-        void inputISR(); // This will be called when inputs change state, it will update the state variable and call the user input callback if set 
 
         //User supplied callbacks
         void (*_userInputCallback)(uint16_t); //Runs for any input change, must be ISR safe, gets the whole state as an argument

@@ -27,9 +27,16 @@ bool MCP23008::init(SemaphoreHandle_t i2cMutex, uint8_t interrupt_pin, uint8_t a
     return true; // For now we assume initialization always succeeds, we could add some checks here to verify communication with the device
 }
 
-void MCP23008::setUpdateCallback(void (*callback)(uint8_t), void *context) {
+void MCP23008::setUpdateCallback(void (*callback)(void*, uint8_t), void *context) {
+    _updateCallback = nullptr;
+    _updateCallbackClass = callback;
+    _updateContext = context;
+}
+
+void MCP23008::setUpdateCallback(void (*callback)(uint8_t)) {
     _updateCallback = callback;
-    updateContext = context;
+    _updateCallbackClass = nullptr;
+    _updateContext = nullptr;
 }
 
 void MCP23008::pinMode_stage(uint8_t pin, PIN_TYPE type) {
@@ -168,8 +175,8 @@ void MCP23008::runBackgroundTask() {
         
         _state = new_data;
 
-        if(_callbackContext){
-            _updateCallback(_state, updateContext); // Call the user callback function with the new state and context
+        if(_updateContext){
+            _updateCallbackClass(_updateContext,_state); // Call the user callback function with the new state and context
         } else if(_updateCallback){
             _updateCallback(_state);
         }
