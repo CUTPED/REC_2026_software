@@ -7,12 +7,13 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
-//This should be moved to main and wire should be initalized before MCP23008.init()
-#define SCL 22
-#define SDA 21
+// These should be done in the main function
+// #define SCL 22
+// #define SDA 21
 
-#define EXTADD 0x20 //This might end up needing to be a variable too
-#define INT_PIN 19 //This might end up needing to be a variable
+//These are default values and can be overridden in the constructor
+#define EXTADD 0x20 
+#define INT_PIN 19 
 
 #define IODIR 0x00 //pin direction 0 = output, 1 = input
 #define IPOL 0x01 // polarity inversion 0 = normal (1 = High, 0 = Low), 1 = inverted
@@ -35,9 +36,10 @@ enum class PIN_TYPE {
 
 class MCP23008 {
     public:
-        MCP23008(SemaphoreHandle_t i2cMutex);
-        MCP23008(SemaphoreHandle_t i2cMutex, uint8_t interrupt_pin, uint8_t address);
-        void setUpdateCallback(std::function<void(uint8_t)> callback); // This allows the user to set a callback function that will be called whenever an interrupt occurs
+        MCP23008() = default;
+        bool init(SemaphoreHandle_t i2cMutex);
+        bool init(SemaphoreHandle_t i2cMutex,uint8_t interrupt_pin, uint8_t address);
+        void setUpdateCallback(void (*callback)(uint8_t), void *context=nullptr); // This allows the user to set a callback function that will be called whenever an interrupt occurs
         void pinMode_stage(uint8_t pin, PIN_TYPE type); // This allows us to stage a bunch of changes to reduce i2c transactions
         void write_stage(uint8_t pin, bool value); // This allows us to stage a bunch of changes to reduce i2c transactions
         void commit(bool force = false); // This will send the staged changes over i2c
@@ -62,7 +64,6 @@ class MCP23008 {
         uint8_t _iodir; 
         uint8_t _gppu;
         uint8_t _gpinten;
-
         
         //These let the ISR have the this pointer
         static void isrTrampoline(void* arg); 
@@ -73,7 +74,8 @@ class MCP23008 {
         void runBackgroundTask();
 
         //user supplied function for when a button is pressed, gets the current state of the inputs as an argument 
-        std::function<void(uint8_t)> _updateCallback = nullptr;
+        void (*_updateCallback)(uint8_t) = nullptr;
+        void *updateContext = nullptr; // This can be used to store any context the user wants to pass to the callback function, it will be passed as an argument to the callback function when it is called
         //Task for reading and calling user function
         TaskHandle_t i2cTaskHandle = NULL;
 };

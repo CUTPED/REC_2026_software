@@ -1,25 +1,14 @@
 #include "MCP23008.h"
 
-MCP23008::MCP23008(SemaphoreHandle_t i2cMutex) : _i2cMutex(i2cMutex), _state(0), _address(EXTADD), _interrupt_pin(INT_PIN) {
-    // Set up interrupt pin
-    pinMode(_interrupt_pin, PIN_TYPE::PIN_PULLUP);
-    
-    // Create a background task for handling I2C communication
-    xTaskCreatePinnedToCore(
-        backgroundTaskTrampoline, // Task function
-        "MCP23008_I2C_Task", // Name of the task
-        2048, // Stack size 
-        this, // Parameter to pass to the task (this pointer)
-        2, // Priority higher than loop
-        &i2cTaskHandle, // Task handle so we can send notifications to it
-        0 // Run on core 0 to keep it separate from loop and other tasks on core 1
-    );
-
-    attachInterruptArg(digitalPinToInterrupt(_interrupt_pin), isrTrampoline, this, FALLING); // Falling edge assumed by default
-    commit(true); // Force commit to initialize the device
+bool MCP23008::init(SemaphoreHandle_t i2cMutex) {
+    return init(i2cMutex, INT_PIN, EXTADD); // Call the more specific init function with default interrupt pin and address
 }
 
-MCP23008::MCP23008(SemaphoreHandle_t i2cMutex, uint8_t interrupt_pin, uint8_t address) : _i2cMutex(i2cMutex), _state(0), _address(address), _interrupt_pin(interrupt_pin) {
+bool MCP23008::init(SemaphoreHandle_t i2cMutex, uint8_t interrupt_pin, uint8_t address) {
+    _i2cMutex = i2cMutex;
+    _address = address;
+    _interrupt_pin = interrupt_pin;
+
     // Set up interrupt pin
     pinMode(_interrupt_pin, PIN_TYPE::PIN_PULLUP);
     
@@ -29,17 +18,18 @@ MCP23008::MCP23008(SemaphoreHandle_t i2cMutex, uint8_t interrupt_pin, uint8_t ad
         "MCP23008_I2C_Task", // Name of the task
         2048, // Stack size 
         this, // Parameter to pass to the task
-        2, // Priority higher than loop
+        2, // Priority higher than loop 
         &i2cTaskHandle, // Task handle so we can send notifications to it
         0 // Run on core 0 to keep it separate from loop and other tasks on core 1
     );
-
     attachInterruptArg(digitalPinToInterrupt(_interrupt_pin), isrTrampoline, this, FALLING); // Falling edge assumed by default
     commit(true); // Force commit to initialize the device
+    return true; // For now we assume initialization always succeeds, we could add some checks here to verify communication with the device
 }
 
-void MCP23008::setUpdateCallback(std::function<void(uint8_t)> callback) {
+void MCP23008::setUpdateCallback(void (*callback)(uint8_t), void *context) {
     _updateCallback = callback;
+    updateContext = context;
 }
 
 void MCP23008::pinMode_stage(uint8_t pin, PIN_TYPE type) {
@@ -177,8 +167,10 @@ void MCP23008::runBackgroundTask() {
         xSemaphoreGive(_i2cMutex);
         
         _state = new_data;
-        
-        if(_updateCallback){
+
+        if(_callbackContext){
+            _updateCallback(_state, updateContext); // Call the user callback function with the new state and context
+        } else if(_updateCallback){
             _updateCallback(_state);
         }
     }
