@@ -22,11 +22,37 @@ bool ControlPanel::init() {
         return false;
     }
     _normal_extender.setUpdateCallback(normalCallbackTrampoline, this);
-    _maintanence_extender.setUpdateCallback(maintenanceCallbackTrampoline, this);
-    //TODO: explicitly call pinMode to setup all pins on extenders
-    //note that using pinMode_stage and commit will be an order of magnitude faster than using pinMode here
 
-    //TODO: pinMode and interrupts for direct inputs (limits, stop button, power monitor)
+    _normal_extender.pinMode_stage(N_EXT_PIN_DISP_LED, PIN_TYPE::PIN_OUTPUT);
+    _normal_extender.pinMode_stage(N_EXT_PIN_RUNNING_LED, PIN_TYPE::PIN_OUTPUT);
+    _normal_extender.pinMode_stage(N_EXT_PIN_STOP_LED, PIN_TYPE::PIN_OUTPUT);
+    _normal_extender.pinMode_stage(N_EXT_PIN_E_STOP_LED, PIN_TYPE::PIN_OUTPUT);
+
+    _normal_extender.pinMode_stage(N_EXT_PIN_DISP_BTN, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+    _normal_extender.pinMode_stage(N_EXT_PIN_DISP_BTN_2, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+    _normal_extender.pinMode_stage(N_EXT_PIN_RESET_BTN, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+    _normal_extender.pinMode_stage(N_EXT_PIN_DISP_LOCK, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+
+    _maintanence_extender.setUpdateCallback(maintenanceCallbackTrampoline, this);
+
+    _maintanence_extender.pinMode_stage(M_EXT_UP_BTN, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+    _maintanence_extender.pinMode_stage(M_EXT_DOWN_BTN, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+    _maintanence_extender.pinMode_stage(M_EXT_LEFT_BTN, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+    _maintanence_extender.pinMode_stage(M_EXT_RIGHT_BTN, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+    _maintanence_extender.pinMode_stage(M_EXT_OK_BTN, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+    _maintanence_extender.pinMode_stage(M_EXT_M_MODE, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+    _maintanence_extender.pinMode_stage(M_EXT_OFF_MODE, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+    _maintanence_extender.pinMode_stage(M_EXT_NORMAL_MODE, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+
+    pinMode(LIFT_LIMIT_LOW, INPUT_PULLUP);
+    pinMode(LIFT_LIMIT_HIGH, INPUT_PULLUP);
+    pinMode(STOP_BTN, INPUT_PULLUP);
+    pinMode(POWER_MONITOR_PIN, INPUT_PULLUP);
+
+    attachInterrupt(digitalPinToInterrupt(LIFT_LIMIT_LOW), ISRtrampoline, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(LIFT_LIMIT_HIGH), ISRtrampoline, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(STOP_BTN), ISRtrampoline, FALLING);
+    attachInterrupt(digitalPinToInterrupt(POWER_MONITOR_PIN), ISRtrampoline, FALLING);
 
     // Reset timer
     _resetTimer = timerBegin(1000000); 

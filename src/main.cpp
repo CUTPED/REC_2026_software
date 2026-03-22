@@ -7,6 +7,7 @@
 
 #define RIDE_CYCLE_TIME 10000 // 10 second ride cycle for testing should be 60000ms later
 
+//State machine
 enum class State {
     STOP,
     AWAITING_DISPATCH,
@@ -15,7 +16,6 @@ enum class State {
     POST,
     MAINTENANCE,
 };
-
 volatile State current_state = State::ESTOP;
 
 // Timers will be created in setup heartbeat gets started in POST
@@ -23,8 +23,31 @@ volatile State current_state = State::ESTOP;
 hw_timer_t *ride_cycle_timer = NULL;
 // This is used for sending CAN messages (1KHz) and updating the PID controllers (100 Hz). 
 hw_timer_t *heartbeat_timer = NULL;
+
+volatile uint8_t send_data[4] = {0,0,0,0};
+volatile uint8_t last_recieved_data[4] = {0,0,0,0};
+twai_node_handle_t twai_handle = NULL;
+
 // This will be incremented in the heartbeat timer callback and set to 0 whenever a heartbeat is received from the ESP_H.
 volatile uint8_t missed_heartbeats = 0; // If we go into the heartbeat isr and this value is 3 or more we go to ESTOP immediately (connection lost)
+
+static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_event_data_t* event_data, void* user_ctx){
+  twai_frame_t rx_msg = {
+    .buffer = last_recieved_data,
+    .buffer_len = sizeof(last_recieved_data),
+  };
+  if(ESP_OK == twai_node_receive_from_isr(handle, &rx_msg)){
+    missed_heartbeats = 0;
+    Serial.printf("Received CAN message with ID: 0x%X, Data: ", rx_msg.header.id);
+    for(int i = 0; i < rx_msg.buffer_len; i++){
+      Serial.printf("%d ", rx_msg.buffer[i]);
+    }
+    Serial.println();
+  }
+  return true;
+}
+
+//TODO: Add Heartbeat ISR for Ian's stuff and sending CAN messages and incrementing missed_heartbeats (also have it trigger E-stop if we miss 3 heartbeats in a row)
 
 
 void IRAM_ATTR ride_cycle_end(){
@@ -90,7 +113,7 @@ void IRAM_ATTR reset_isr(){
     }
 }
 
-// TODO: Add Ian's class(es) and drive the 2 lower motors
+// TODO: Add Ian's class as global vars for the 2 lower motors
 
 void setup() {
     Serial.begin(115200);
@@ -106,7 +129,7 @@ void setup() {
     );
     // Set up controll panel interrupts
     controlPanel.setResetCallback(reset_isr); // Set the reset callback to the reset_isr function 
-    // TODO: Set up input callback
+    // TODO: attach up input callback
 
 
     //ride_cycle_timer setup
@@ -122,7 +145,9 @@ void setup() {
 void loop() {
     // TODO: Implement safety checks that can pull the state into ESTOP (Current monitoring, diag pins, etc.)
 
-    // TODO: Move state_switching logic to the callbacks
+    // TODO: Move state_switching logic to the callbacks (post and input are the only ones that should change to a state other than estop)
+
+    //TODO: Add text to the LCD and set LEDs according to the state using the control panel class.
     switch (current_state) {
         case State::STOP:
             Serial.println("Currently in STOP state");
