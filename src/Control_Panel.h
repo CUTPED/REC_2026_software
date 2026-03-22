@@ -90,7 +90,8 @@ class ControlPanel {
         ControlPanel() = default;
         bool init(); 
         uint16_t getState(); 
-        void setDisplayText(const char* text,bool force = false); // This will set the text to be displayed on the LCD, if force is true it will update the display immediately, otherwise it will compare to the cached display text and only update if it has changed to reduce I2C traffic
+        void setDisplayText(const char* line1,bool force = false); // This will set the text to be displayed on the LCD, if force is true it will update the display immediately, otherwise it will compare to the cached display text and only update if it has changed to reduce I2C traffic
+        void setDisplayText(const char* line1,const char* line2, bool force = false); // This will set the text to be displayed on the LCD, if force is true it will update the display immediately, otherwise it will compare to the cached display text and only update if it has changed to reduce I2C traffic
         void setInputCallback(void (*callback)(uint16_t)); // This will be called as an ISR when any of the inputs change state and get the whole state (it is not an ISR for extended inputs)
         void setResetCallback(void (*callback)()); // This will be called when the reset button is held down. In principle this should be set to the POST function 
         bool setResetHoldTime(uint16_t time_ms); // This will set the amount of time the reset button needs to be held down to trigger the reset callback
@@ -106,11 +107,13 @@ class ControlPanel {
         //For these variables a 0 represents a button that is pressed or a limit switch that is triggered, and a 1 represents a button that is not pressed or a limit switch that is not triggered
         uint16_t volatile _state; 
         uint16_t volatile _prevState; // This will store the previous state to detect changes
-        char *_displayText; // This will store the current text to be displayed on the LCD 
+        char *_displayLine1; // This will store the current text to be displayed on the LCD 
+        char *_displayLine2; // This will store the current text to be displayed on the LCD 
 
         uint16_t _resetHoldTime = 3000; // Default to 3 seconds, this is the amount of time the reset button needs to be held down to trigger the reset callback
         hw_timer_t *_resetTimer;
-        
+        bool _resetTimerStarted = false;
+
         static void normalCallbackTrampoline(void* context, uint8_t state); 
         void normalExtenderCallback(uint8_t state);
 

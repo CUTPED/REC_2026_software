@@ -6,6 +6,9 @@ bool ControlPanel::init() {
     if (_i2cMutex == NULL) {
         return false;
     }
+
+    // Wire 
+    Wire.begin(SDA, SCL,400000); // Fast Mode
     
     // LCD
     _lcd.init();
@@ -20,6 +23,10 @@ bool ControlPanel::init() {
     }
     _normal_extender.setUpdateCallback(normalCallbackTrampoline, this);
     _maintanence_extender.setUpdateCallback(maintenanceCallbackTrampoline, this);
+    //TODO: explicitly call pinMode to setup all pins on extenders
+    //note that using pinMode_stage and commit will be an order of magnitude faster than using pinMode here
+
+    //TODO: pinMode and interrupts for direct inputs (limits, stop button, power monitor)
 
     // Reset timer
     _resetTimer = timerBegin(1000000); 
@@ -34,15 +41,33 @@ uint16_t ControlPanel::getState() {
     return _state;
 }
 
-void ControlPanel::setDisplayText(const char* text,bool force) {
-    
-    if(force || (strcmp(text, _displayText) !=0)){
+void ControlPanel::setDisplayText(const char* line1,bool force) {    
+    if(force || (strcmp(line1, _displayLine1) !=0)){
         xSemaphoreTake(_i2cMutex, portMAX_DELAY);
         _lcd.clear();
         _lcd.setCursor(0, 0);
-        _lcd.print(text);
+        _lcd.print(line1);
         xSemaphoreGive(_i2cMutex);
-        strcpy(_displayText, text);
+        strcpy(_displayLine1, line1);
+    }
+}
+
+void ControlPanel::setDisplayText(const char* line1, const char* line2,bool force) {    
+    if(force || (strcmp(line1, _displayLine1) !=0)){
+        xSemaphoreTake(_i2cMutex, portMAX_DELAY);
+        _lcd.clear();
+        _lcd.setCursor(0, 0);
+        _lcd.print(line1);
+        xSemaphoreGive(_i2cMutex);
+        strcpy(_displayLine1, line1);
+    }
+    if(force || (strcmp(line2, _displayLine2) !=0)){
+        xSemaphoreTake(_i2cMutex, portMAX_DELAY);
+        _lcd.clear();
+        _lcd.setCursor(0, 1);
+        _lcd.print(line2);
+        xSemaphoreGive(_i2cMutex);
+        strcpy(_displayLine2, line2);
     }
 }
 
@@ -55,10 +80,9 @@ void ControlPanel::setResetCallback(void (*callback)()) {
 }
 
 bool ControlPanel::setResetHoldTime(uint16_t time_ms) {
-    // TODO: Replace timerStarted with something that works (prolly class variable)
-    // if(timerStarted(_resetTimer)){ 
-    //     return false; 
-    // }
+    if(_resetTimerStarted){ 
+        return false; 
+    }
     _resetHoldTime = time_ms;
     return true;
 }
@@ -77,16 +101,17 @@ void ControlPanel::normalExtenderCallback(uint8_t state) {
 
     //reset logic (this both starts and cancels the timer for the reset button)
     if (_state & (1<<RESET_BTN_BIT)){ // 1 --> button released or never pressed
-        // if(timerStarted(_resetTimer)){
-        //     timerStop(_resetTimer); 
-        // }
-        timerStop(_resetTimer); 
+        if(_resetTimerStarted){
+            timerStop(_resetTimer); 
+            _resetTimerStarted = false;
+        }
     } else { // 0 --> button down 
-        // if(!timerStarted(_resetTimer)){
+        if(!_resetTimerStarted){
             timerRestart(_resetTimer);
             timerAlarm(_resetTimer, _resetHoldTime * 1000, false,0); 
             timerStart(_resetTimer);
-        //}
+            _resetTimerStarted = true;
+        }
     }
 
     if(_userInputCallback){
@@ -123,12 +148,12 @@ void ControlPanel::resetCallback() {
     }
 }
 
-void ISRtrampoline(void* arg) {
+void IRAM_ATTR ISRtrampoline(void* arg) {
     ControlPanel* panel = static_cast<ControlPanel*>(arg);
     panel->inputISR();
 }
 
-void ControlPanel::inputISR() {
+void IRAM_ATTR ControlPanel::inputISR() {
     // This function will be called when any of the inputs change state, it will update the state variable and call the user input callback if set 
     uint16_t new_state = 0;
     new_state |= digitalRead(LIFT_LIMIT_LOW) << 0; // Bit 0: Low limit
