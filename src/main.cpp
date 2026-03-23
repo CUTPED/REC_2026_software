@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include "Control_Panel.h"
+#include "Motor_PID.h"
 #include <functional>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -9,11 +10,11 @@
 
 //State machine
 enum class State {
-    STOP,
-    AWAITING_DISPATCH,
-    NORMAL,
     ESTOP,
     POST,
+    STATIONARY,
+    NORMAL,
+    STOPPING,
     MAINTENANCE,
 };
 volatile State current_state = State::ESTOP;
@@ -49,7 +50,7 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_e
 
 //TODO: Add Heartbeat ISR for Ian's stuff and sending CAN messages and incrementing missed_heartbeats (also have it trigger E-stop if we miss 3 heartbeats in a row)
 
-
+//TODO: change.
 void IRAM_ATTR ride_cycle_end(){
     timerStop(ride_cycle_timer);
     if(current_state == State::NORMAL){ // Only transition back to STOP if we're currently in NORMAL state, otherwise we might interrupt an ESTOP or MAINTANENCE cycle
@@ -61,15 +62,24 @@ void IRAM_ATTR ride_cycle_end(){
 
 void IRAM_ATTR estop_isr(){
     current_state = State::ESTOP; // Transition to ESTOP state immediately when the E-stop button is pressed
-    // This should also pull enable low on both drivers and pull shutdown low
+    // TODO: This should also pull enable low on both drivers and pull shutdown low
     // Enable will be part of motor class and shutdown will be in main
 }
 
 ControlPanel controlPanel; // Global instance of the control panel still need to call init in setup
 
-
+//Ride cycle stuff will be called in loop and will update target postions and velocities for motors
 bool rideCycleHandler(unsigned long timer_value) {
-    return true; //for now
+    if(timer_value <= SPIN_UP_TIME){
+        spinUpCycle(timer_value);
+    }else if(timer_value <= RIDE_CYCLE_TIME - SPIN_DOWN_TIME){
+        normalRideCycle(timer_value - SPIN_UP_TIME);
+    }else if(timer_value <= RIDE_CYCLE_TIME){
+        spinDownCycle(timer_value - (RIDE_CYCLE_TIME - SPIN_DOWN_TIME));
+    } else{
+        return false; // Ride cycle is over
+    }
+    return true; 
 }
 
 
@@ -113,7 +123,10 @@ void IRAM_ATTR reset_isr(){
     }
 }
 
-// TODO: Add Ian's class as global vars for the 2 lower motors
+MotorPID LiftMotor;
+MotorPID Central_Axis_Motor;
+
+//TODO: Maintainence Mode functions (This might become part of the input callback with a big if at the top)
 
 void setup() {
     Serial.begin(115200);
@@ -140,6 +153,9 @@ void setup() {
 
     // TODO: Same for heartbeat timer 
 
+    //Motor Initialization
+    LiftMotor.init(/*pcnt_unit=*/PCNT_UNIT_0, /*pwm_pin_1=*/LIFT_PWM_1, /*pwm_pin_2=*/LIFT_PWM_2, /*ledc_channel_1=*/LEDC_CHANNEL_0, /*ledc_channel_2=*/LEDC_CHANNEL_1);
+    Central_Axis_Motor.init(/*pcnt_unit=*/PCNT_UNIT_1, /*pwm_pin_1=*/CENTRAL_AXIS_PWM_1, /*pwm_pin_2=*/CENTRAL_AXIS_PWM_2, /*ledc_channel_1=*/LEDC_CHANNEL_2, /*ledc_channel_2=*/LEDC_CHANNEL_3);
 }
 
 void loop() {
