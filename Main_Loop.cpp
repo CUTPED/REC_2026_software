@@ -1,5 +1,6 @@
 #include <Arduino.h>
 
+
 //THESE ARE USED FOR NON-SAFETY CRITICAL CONTROLS
 //safety critical stuff like E-stop need to be handled in interrupts
 #define NUM_INPUTS 2
@@ -16,6 +17,7 @@
 #define LOOP_DELAY_TIME 10 // This is the delay time for the main loop, which will be used to check button states and update the state machine. 
 #define DEBOUNCE_TIME 10 // This is the time in milliseconds that the button needs to be held down to be considered a valid press.
 #define RESET_HOLD_TIME 3000 // This is the time in milliseconds that the reset button needs to be held down to transition from ESTOP to stop state. 3000 ms (3 seconds)
+
 const int RESET_MIN_CYCLES = RESET_HOLD_TIME / (LOOP_DELAY_TIME +DEBOUNCE_TIME); // This calculates the number of loop cycles the reset button needs to be held for based on the defined hold time and loop delay time
 
 enum State {
@@ -27,6 +29,9 @@ enum State {
 
 volatile State current_state = ESTOP;
 
+
+//Limit Switch pin
+
 //Here we will put the heartbeat timer
 
 
@@ -36,6 +41,8 @@ int input_pins[NUM_INPUTS] = {DISPATCH_BUTTON_PIN, RESET_BUTTON_PIN};
 //Is also where we define an array for io_extended inputs
 
 
+
+
 //This is the ride cycle timer, started when transitioning from STOP to NORMAL, and will be used to track the ride cycle and return to stop state
 hw_timer_t *ride_cycle_timer = NULL;
 
@@ -43,10 +50,8 @@ void IRAM_ATTR ride_cycle_end(){
     timerStop(ride_cycle_timer);
     if(current_state == NORMAL){ // Only transition back to STOP if we're currently in NORMAL state, otherwise we might interrupt an ESTOP or MAINTANENCE cycle
         current_state = STOP; // Transition back to STOP state at the end of the ride cycle
-        // Serial.println("Ride cycle ended, transitioning back to STOP state");
     }else{
         current_state = ESTOP; // If we're not in NORMAL state at the end of the ride cycle, something went wrong, so transition to ESTOP
-        // Serial.println("Ride cycle ended, but not in NORMAL state, ESTOP");
     }
 }
 
@@ -56,6 +61,10 @@ void IRAM_ATTR estop_isr(){
 }
 
 bool rideCycleHandler(unsigned long timer_value) {
+    return true; //for now
+}
+
+bool POST(){
     return true; //for now
 }
 
@@ -82,6 +91,9 @@ void setup() {
     //E-stop button interrupt setup
     pinMode(ESTOP_BUTTON_PIN, INPUT_PULLUP); // Set the E-stop button pin as input with pull-up resistor
     attachInterrupt(digitalPinToInterrupt(ESTOP_BUTTON_PIN), estop_isr, FALLING); // Attach an interrupt to the E-stop button pin
+
+    // Add interrupt for IO extended inputs:
+
 }
 
 void loop() {
@@ -134,8 +146,13 @@ void loop() {
             Serial.println("Currently in ESTOP state");
             analogWrite(ESTOP_LED_PIN, 50); // Turn on the ESTOP LED 
             if (reset_cycles > RESET_MIN_CYCLES){ // This is the amount of time the button must be held divided by the loop delay time (+10 for the debounce delay) to determine how many cycles the button needs to be held for
-                current_state = STOP;
-                Serial.println("Transitioning to STOP state");
+                reset_cycles = 0; // Reset the cycle count after transitioning to STOP state
+                if(POST()){
+                    current_state = STOP;
+                    Serial.println("Transitioning to STOP state");
+                }else{
+                    Serial.println("POST failed, remaining in ESTOP state");
+                }
             }
             break;
         case MAINTANENCE:
