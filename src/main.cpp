@@ -60,13 +60,17 @@ hw_timer_t *ride_cycle_timer = NULL;
 // This is used for sending CAN messages (1KHz) and updating the PID controllers (100 Hz). 
 hw_timer_t *heartbeat_timer = NULL;
 
-twai_node_handle_t twai_handle = NULL;
-
 MotorPID LiftMotor;
 MotorPID Central_Axis_Motor;
 
 // This will be incremented in the heartbeat timer callback and set to 0 whenever a heartbeat is received from the ESP_H.
-volatile uint8_t missed_heartbeats = 0; // If we go into the heartbeat isr and this value is 3 or more we go to ESTOP immediately (connection lost)
+fuint8_t missed_heartbeats = 0; // If we go into the heartbeat isr and this value is 3 or more we go to ESTOP immediately (connection lost)
+
+void IRAM_ATTR estop_isr(){
+    current_state = State::ESTOP; // Transition to ESTOP state immediately when the E-stop button is pressed
+    // TODO: This should also pull enable low on both drivers and pull shutdown low
+    // Enable will be part of motor class and shutdown will be in main
+}
 
 volatile float secondary_motor_rpm_value = 0.0f; 
 
@@ -83,7 +87,7 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_e
             missed_heartbeats = 0;
         }
     }else{
-        // TODO: others I think this is just for startup?
+        // TODO: others? There might be startup stuff this should also be for error frames
     }
     // Serial.printf("Received CAN message with ID: 0x%X, Data: ", rx_msg.header.id);
     for(int i = 0; i < rx_msg.buffer_len; i++){
@@ -94,9 +98,44 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_e
   return true;
 }
 
-//TODO: Add Heartbeat ISR for Ian's stuff and sending CAN messages and incrementing missed_heartbeats (also have it trigger E-stop if we miss 3 heartbeats in a row)
+uint8_t heartbeat_data[4] = {0,0,0,0}; 
+twai_node_handle_t twai_handle = NULL;
+twai_frame_t heartbeat_msg = {
+    .header ={
+      .id = 0x100, // CAN message ID lower values are higher priority on the bus
+      .ide = false, // This just means don't use extended frame format 
+    },
+    .buffer = (uint8_t*)heartbeat_data, // Point to the data we want to send
+    .buffer_len = sizeof(heartbeat_data), // This just specifies the length of the data we're sending, which is 1 byte in this case
+};
 
-//TODO: change.
+uint8_t pid_update_counter = 0;
+
+void IRAM_ATTR heartbeat_timer_callback(){
+    if (pid_update_counter >= 10){ // Update PID controllers every 10ms (100 Hz)
+        LiftMotor.update();
+        Central_Axis_Motor.update();
+        pid_update_counter = 0;
+    }
+
+    missed_heartbeats++;
+    if(missed_heartbeats >= 3){
+        //ERROR_CODE = n // TODO: set an error code for missed heartbeats that can be sent over CAN and displayed on the LCD
+        estop_isr(); // If we miss 3 heartbeats in a row, go to ESTOP
+    }
+    heartbeat_data[0] = static_cast<uint8_t>(current_state); // Send the current state in the heartbeat message, you can also add other data here if needed
+    heartbeat_data[1] = (uint8_t)secondary_motor_rpm_value; 
+    heartbeat_data[2] = 0; // These bits will be used in maintainence mode
+    heartbeat_data[3] = 0; 
+    memcpy(heartbeat_msg.buffer, (uint8_t*)heartbeat_data, sizeof(heartbeat_data)); // Update the data field of the CAN message with the current value of x
+    ESP_ERROR_CHECK(twai_node_transmit(twai_handle, &heartbeat_msg,0));
+
+    pid_update_counter++;
+}
+
+//TODO: Maintainence mode CAN messages are prolly important
+
+//FIXME: This sucks.
 void IRAM_ATTR ride_cycle_end(){
     timerStop(ride_cycle_timer);
     if(current_state == State::NORMAL){ // Only transition back to STOP if we're currently in NORMAL state, otherwise we might interrupt an ESTOP or MAINTANENCE cycle
@@ -104,12 +143,6 @@ void IRAM_ATTR ride_cycle_end(){
     }else{
         current_state = State::ESTOP; // If we're not in NORMAL state at the end of the ride cycle, something went wrong, so transition to ESTOP
     }
-}
-
-void IRAM_ATTR estop_isr(){
-    current_state = State::ESTOP; // Transition to ESTOP state immediately when the E-stop button is pressed
-    // TODO: This should also pull enable low on both drivers and pull shutdown low
-    // Enable will be part of motor class and shutdown will be in main
 }
 
 ControlPanel controlPanel; // Global instance of the control panel still need to call init in setup
@@ -175,7 +208,7 @@ void POST_task(void* pvParameters){
     // otherwise start the heartbeat, and watchdog timers
     // perform any other necessary startup checks here
     // if everything checks out, transition to STOP, otherwise stay in ESTOP
-    
+    //TODO: after supplying power, waiting and send the startup CAN message, we can wait for a notificaition from the recieve callback.
     //FOR TESTING
     vTaskDelay(3000 / portTICK_PERIOD_MS); 
     current_state = State::STATIONARY; 
