@@ -49,10 +49,10 @@ bool ControlPanel::init() {
     pinMode(STOP_BTN, INPUT_PULLUP);
     pinMode(POWER_MONITOR_PIN, INPUT_PULLUP);
 
-    attachInterrupt(digitalPinToInterrupt(LIFT_LIMIT_LOW), ISRtrampoline, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(LIFT_LIMIT_HIGH), ISRtrampoline, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(STOP_BTN), ISRtrampoline, FALLING);
-    attachInterrupt(digitalPinToInterrupt(POWER_MONITOR_PIN), ISRtrampoline, FALLING);
+    attachInterruptArg(digitalPinToInterrupt(LIFT_LIMIT_LOW), inputISRtrampoline, this, CHANGE);
+    attachInterruptArg(digitalPinToInterrupt(LIFT_LIMIT_HIGH), inputISRtrampoline, this, CHANGE);
+    attachInterruptArg(digitalPinToInterrupt(STOP_BTN), inputISRtrampoline, this, FALLING);
+    attachInterruptArg(digitalPinToInterrupt(POWER_MONITOR_PIN), inputISRtrampoline, this, FALLING);
 
     // Reset timer
     _resetTimer = timerBegin(1000000); 
@@ -174,7 +174,7 @@ void ControlPanel::resetCallback() {
     }
 }
 
-void IRAM_ATTR ISRtrampoline(void* arg) {
+void IRAM_ATTR ControlPanel::inputISRtrampoline(void* arg) {
     ControlPanel* panel = static_cast<ControlPanel*>(arg);
     panel->inputISR();
 }

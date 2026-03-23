@@ -5,17 +5,52 @@
 #include <functional>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include "esp_twai.h"
+#include "esp_twai_onchip.h"
+#include "driver/pulse_cnt.h"
+#include "driver/ledc.h"
 
-#define RIDE_CYCLE_TIME 10000 // 10 second ride cycle for testing should be 60000ms later
+#define RIDE_CYCLE_TIME 60000 // Total time for the ride cycle in milliseconds (1 minute)
+#define SPIN_UP_TIME 20000 // Time for spin up phase
+#define SPIN_DOWN_TIME 20000 // Time for spin down phase
+
+#define MAX_LIFT_POS 3600.0f // Maximum lift position in degrees
+#define MAX_CENTRAL_AXIS_RPM 54.0f // Maximum central axis RPM
+#define MAX_SECONDARY_AXIS_RPM 135.0f // Maximum secondary axis RPM 
+
+#define CENTER_MOTOR_ENCODER_A 36
+#define CENTER_MOTOR_ENCODER_B 39
+#define LIFT_MOTOR_ENCODER_A 34
+#define LIFT_MOTOR_ENCODER_B 35
+
+#define CENTER_MOTOR_PWM_1 19
+#define CENTER_MOTOR_PWM_2 18
+
+#define LIFT_MOTOR_PWM_1 32
+#define LIFT_MOTOR_PWM_2 33
+
+#define ENABLE_PIN 12
+
+#define LIFT_MOTOR_CPR 7974.4
+#define CENTRAL_AXIS_CPR 7974.4
+
+#define LIFT_MOTOR_KP 0.5f
+#define LIFT_MOTOR_KI 0.1f
+#define LIFT_MOTOR_KD 0.05f
+
+#define CENTRAL_AXIS_KP 0.5f
+#define CENTRAL_AXIS_KI 0.1f
+#define CENTRAL_AXIS_KD 0.05f
+
 
 //State machine
-enum class State {
-    ESTOP,
-    POST,
-    STATIONARY,
-    NORMAL,
-    STOPPING,
-    MAINTENANCE,
+enum class State: uint8_t {
+    ESTOP = 5,
+    POST = 1,
+    STATIONARY = 2,
+    NORMAL = 3,
+    STOPPING = 4,
+    MAINTENANCE = 6,
 };
 volatile State current_state = State::ESTOP;
 
@@ -25,21 +60,32 @@ hw_timer_t *ride_cycle_timer = NULL;
 // This is used for sending CAN messages (1KHz) and updating the PID controllers (100 Hz). 
 hw_timer_t *heartbeat_timer = NULL;
 
-volatile uint8_t send_data[4] = {0,0,0,0};
-volatile uint8_t last_recieved_data[4] = {0,0,0,0};
 twai_node_handle_t twai_handle = NULL;
+
+MotorPID LiftMotor;
+MotorPID Central_Axis_Motor;
 
 // This will be incremented in the heartbeat timer callback and set to 0 whenever a heartbeat is received from the ESP_H.
 volatile uint8_t missed_heartbeats = 0; // If we go into the heartbeat isr and this value is 3 or more we go to ESTOP immediately (connection lost)
 
+volatile float secondary_motor_rpm_value = 0.0f; 
+
 static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_event_data_t* event_data, void* user_ctx){
+    uint8_t rx_data[4];
   twai_frame_t rx_msg = {
-    .buffer = last_recieved_data,
-    .buffer_len = sizeof(last_recieved_data),
+    .buffer = rx_data,
+    .buffer_len = sizeof(rx_data),
   };
   if(ESP_OK == twai_node_receive_from_isr(handle, &rx_msg)){
-    missed_heartbeats = 0;
-    Serial.printf("Received CAN message with ID: 0x%X, Data: ", rx_msg.header.id);
+    //TODO: Compare recieved state to current state and stop if they dont match dont reset the missed heartbeat counter
+    if(rx_msg.header.id == 0x100){ // This is a heartbeat message
+        if(static_cast<uint8_t>(current_state) == rx_msg.buffer[0]){ // If the state sent by the ESP_H doesn't match our current state, something is wrong, so go to ESTOP
+            missed_heartbeats = 0;
+        }
+    }else{
+        // TODO: others I think this is just for startup?
+    }
+    // Serial.printf("Received CAN message with ID: 0x%X, Data: ", rx_msg.header.id);
     for(int i = 0; i < rx_msg.buffer_len; i++){
       Serial.printf("%d ", rx_msg.buffer[i]);
     }
@@ -54,7 +100,7 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_e
 void IRAM_ATTR ride_cycle_end(){
     timerStop(ride_cycle_timer);
     if(current_state == State::NORMAL){ // Only transition back to STOP if we're currently in NORMAL state, otherwise we might interrupt an ESTOP or MAINTANENCE cycle
-        current_state = State::STOP; // Transition back to STOP state at the end of the ride cycle
+        current_state = State::STATIONARY; // Transition back to STOP state at the end of the ride cycle
     }else{
         current_state = State::ESTOP; // If we're not in NORMAL state at the end of the ride cycle, something went wrong, so transition to ESTOP
     }
@@ -69,6 +115,30 @@ void IRAM_ATTR estop_isr(){
 ControlPanel controlPanel; // Global instance of the control panel still need to call init in setup
 
 //Ride cycle stuff will be called in loop and will update target postions and velocities for motors
+void spinUpCycle(unsigned long timer_value){
+    // This function will be called during the spin up phase of the ride cycle, it should ramp up the motors to their target speeds/positions over the course of the spin up time
+    // For example, you could use a simple linear ramp like this:
+    float ramp_percentage = (float)timer_value / SPIN_UP_TIME;
+    LiftMotor.setGoalPos(ramp_percentage * MAX_LIFT_POS);
+    Central_Axis_Motor.setGoalVelo(ramp_percentage * MAX_CENTRAL_AXIS_RPM);
+    secondary_motor_rpm_value = ramp_percentage * MAX_SECONDARY_AXIS_RPM;
+}
+
+void normalRideCycle(unsigned long timer_value){
+    // This function will be called during the normal phase of the ride cycle, it should set the motors to their target speeds/positions for the normal ride cycle
+    LiftMotor.setGoalPos(MAX_LIFT_POS);
+    Central_Axis_Motor.setGoalVelo(MAX_CENTRAL_AXIS_RPM);
+    secondary_motor_rpm_value = MAX_SECONDARY_AXIS_RPM;
+}
+
+void spinDownCycle(unsigned long timer_value){
+    // This function will be called during the spin down phase of the ride cycle, it should ramp down the motors to 0 over the course of the spin down time
+    float ramp_percentage = 1.0f - ((float)timer_value / SPIN_DOWN_TIME);
+    LiftMotor.setGoalPos(ramp_percentage * MAX_LIFT_POS);
+    Central_Axis_Motor.setGoalVelo(ramp_percentage * MAX_CENTRAL_AXIS_RPM);
+    secondary_motor_rpm_value = ramp_percentage * MAX_SECONDARY_AXIS_RPM;
+}
+
 bool rideCycleHandler(unsigned long timer_value) {
     if(timer_value <= SPIN_UP_TIME){
         spinUpCycle(timer_value);
@@ -108,7 +178,7 @@ void POST_task(void* pvParameters){
     
     //FOR TESTING
     vTaskDelay(3000 / portTICK_PERIOD_MS); 
-    current_state = State::STOP; 
+    current_state = State::STATIONARY; 
   }
 }
 
@@ -122,9 +192,6 @@ void IRAM_ATTR reset_isr(){
         }
     }
 }
-
-MotorPID LiftMotor;
-MotorPID Central_Axis_Motor;
 
 //TODO: Maintainence Mode functions (This might become part of the input callback with a big if at the top)
 
@@ -154,8 +221,8 @@ void setup() {
     // TODO: Same for heartbeat timer 
 
     //Motor Initialization
-    LiftMotor.init(/*pcnt_unit=*/PCNT_UNIT_0, /*pwm_pin_1=*/LIFT_PWM_1, /*pwm_pin_2=*/LIFT_PWM_2, /*ledc_channel_1=*/LEDC_CHANNEL_0, /*ledc_channel_2=*/LEDC_CHANNEL_1);
-    Central_Axis_Motor.init(/*pcnt_unit=*/PCNT_UNIT_1, /*pwm_pin_1=*/CENTRAL_AXIS_PWM_1, /*pwm_pin_2=*/CENTRAL_AXIS_PWM_2, /*ledc_channel_1=*/LEDC_CHANNEL_2, /*ledc_channel_2=*/LEDC_CHANNEL_3);
+    LiftMotor.init(LIFT_MOTOR_ENCODER_A, LIFT_MOTOR_ENCODER_B, LIFT_MOTOR_PWM_1, LIFT_MOTOR_PWM_2, ENABLE_PIN, LIFT_MOTOR_CPR, LEDC_CHANNEL_0,LEDC_CHANNEL_1, LIFT_MOTOR_KP, LIFT_MOTOR_KI, LIFT_MOTOR_KD, 10);
+    Central_Axis_Motor.init(CENTER_MOTOR_ENCODER_A, CENTER_MOTOR_ENCODER_B, CENTER_MOTOR_PWM_1, CENTER_MOTOR_PWM_2, ENABLE_PIN, CENTRAL_AXIS_CPR, LEDC_CHANNEL_2, LEDC_CHANNEL_3, CENTRAL_AXIS_KP, CENTRAL_AXIS_KI, CENTRAL_AXIS_KD, 10);
 }
 
 void loop() {
@@ -165,8 +232,8 @@ void loop() {
 
     //TODO: Add text to the LCD and set LEDs according to the state using the control panel class.
     switch (current_state) {
-        case State::STOP:
-            Serial.println("Currently in STOP state");
+        case State::STATIONARY:
+            Serial.println("Currently in STATIONARY state");
             // if (dispatch_pressed) {
             //     current_state = State::NORMAL;
             //     Serial.println("Transitioning to NORMAL state");

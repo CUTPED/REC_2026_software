@@ -6,6 +6,7 @@ uint8_t x;
 twai_node_handle_t twai_handle = NULL;
 hw_timer_t *heartbeat_timer = NULL;
 volatile uint8_t send_data[2] = {0,1};
+twai_node_handle_t twai_handle = NULL;
 twai_frame_t tx_msg = {
     .header ={
       .id = 0x10, // CAN message ID lower values are higher priority on the bus, so 0x10 is a relatively high priority message
@@ -34,9 +35,7 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_e
     }
     Serial.println();
   }
-  
   return true;
-
 }
 
 void setup() {

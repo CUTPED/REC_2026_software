@@ -122,7 +122,7 @@ class ControlPanel {
 
         static void resetTimerTrampoline(void* arg);
         void resetCallback();
-        static void ISRtrampoline(void* arg);
+        static void inputISRtrampoline(void* arg);
 
         //User supplied callbacks
         void (*_userInputCallback)(uint16_t); //Runs for any input change, must be ISR safe, gets the whole state as an argument

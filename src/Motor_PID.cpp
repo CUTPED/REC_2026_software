@@ -1,6 +1,8 @@
 #include "Motor_PID.h"
 
-bool MotorPID::init(int enc_A_pin, int enc_B_pin, int pwm_pin_1, int pwm_pin_2, int enable_pin, int counts_per_rev, ledc_channel_t ledc_channel_1, ledc_channel_t ledc_channel_2, float Kp, float Ki, float Kd, int timestep_ms) {
+bool MotorPID::_ledc_timer_initialized = false;
+
+bool MotorPID::init(int enc_A_pin, int enc_B_pin, int pwm_pin_1, int pwm_pin_2, int enable_pin, float counts_per_rev, ledc_channel_t ledc_channel_1, ledc_channel_t ledc_channel_2, float Kp, float Ki, float Kd, int timestep_ms) {
     _Kp = Kp;
     _Ki = Ki;
     _Kd = Kd;
@@ -10,11 +12,11 @@ bool MotorPID::init(int enc_A_pin, int enc_B_pin, int pwm_pin_1, int pwm_pin_2, 
     _enablePin = enable_pin;
     _targetVelocity = 0;
     _targetPosition = 0;
-    countsPerRev = counts_per_rev;
+    _countsPerRev = counts_per_rev;
     pinMode(_enablePin, OUTPUT);
     digitalWrite(_enablePin, LOW);
-    pinMode(_enc_A_pin, INPUT);
-    pinMode(_enc_B_pin, INPUT);
+    pinMode(enc_A_pin, INPUT);
+    pinMode(enc_B_pin, INPUT);
     pinMode(pwm_pin_1, OUTPUT);
     pinMode(pwm_pin_2, OUTPUT);
     if(!initPCNT(enc_A_pin, enc_B_pin)){
@@ -121,12 +123,12 @@ bool MotorPID::initLEDC(int pwm_pin_1, int pwm_pin_2, ledc_channel_t ledc_channe
     return true;
 }
 
-void MotorPID::update() {
+IRAM_ATTR void MotorPID::update() {
     _last_raw_count = _raw_count;
     pcnt_unit_get_count(_pcnt_unit, &_raw_count);
     if(_velocity_mode){
         //Velocity control        
-        rpm_value = ((_raw_count - _last_raw_count) / countsPerRev) * (60000.0f / _timestep_ms); // Convert count difference to RPM
+        float rpm_value = ((_raw_count - _last_raw_count) / _countsPerRev) * (60000.0f / _timestep_ms); // Convert count difference to RPM
         
         // Incremental PI calculations
         _prev_err = _err;
