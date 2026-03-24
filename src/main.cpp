@@ -274,7 +274,7 @@ void IRAM_ATTR input_isr(uint16_t buttonData){
             estop_isr();
         }
         else if(!(buttonData & 0x4)){
-            current_state = State::STATIONARY;
+            current_state = State::STOPPING;
         }
     }
  }
