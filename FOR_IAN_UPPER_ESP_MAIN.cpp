@@ -12,28 +12,42 @@
 #define MAX_SECONDARY_AXIS_RPM 135.0f // Maximum secondary axis RPM 
 
 //TODO: change these pin definitions for upper
-// #define CENTER_MOTOR_ENCODER_A 36
-// #define CENTER_MOTOR_ENCODER_B 39
-// #define LIFT_MOTOR_ENCODER_A 34
-// #define LIFT_MOTOR_ENCODER_B 35
+#define MOTOR_1_ENCODER_A 4
+#define MOTOR_1_ENCODER_B 5
+#define MOTOR_2_ENCODER_A 18
+#define MOTOR_2_ENCODER_B 19
+#define MOTOR_3_ENCODER_A 26
+#define MOTOR_3_ENCODER_B 27
 
-// #define CENTER_MOTOR_PWM_1 19
-// #define CENTER_MOTOR_PWM_2 18
+#define MOTOR_1_PWM_1 16
+#define MOTOR_1_PWM_2 17
+#define MOTOR_2_PWM_1 23
+#define MOTOR_2_PWM_2 25
+#define MOTOR_3_PWM_1 32
+#define MOTOR_3_PWM_2 33
 
-// #define LIFT_MOTOR_PWM_1 32
-// #define LIFT_MOTOR_PWM_2 33
+#define ENABLE_PIN 13
 
-// #define ENABLE_PIN 12
+// #degine OCM_1 SENSOR_VP
+// #define OCM_2 SENSOR_VN
+// #define OCM_3 35
 
 //TODO: change these CPR values for upper motors
-// #define LIFT_MOTOR_CPR 7974.4
-// #define CENTRAL_AXIS_CPR 7974.4
+#define MOTOR_1_CPR 960
+#define MOTOR_2_CPR 960
+#define MOTOR_3_CPR 960
 
 
 //TODO: change these PID tunings same for all upper motors
-// #define LIFT_MOTOR_KP 0.5f
-// #define LIFT_MOTOR_KI 0.1f
-// #define LIFT_MOTOR_KD 0.05f
+#define MOTOR_1_KP 0.5f
+#define MOTOR_1_KI 0.1f
+#define MOTOR_1_KD 0.05f
+#define MOTOR_2_KP 0.5f
+#define MOTOR_2_KI 0.1f
+#define MOTOR_2_KD 0.05f
+#define MOTOR_3_KP 0.5f
+#define MOTOR_3_KI 0.1f
+#define MOTOR_3_KD 0.05f
 
 
 
@@ -55,8 +69,9 @@ hw_timer_t *heartbeat_timer = NULL;
 twai_node_handle_t twai_handle = NULL;
 
 // TODO: new motors same class x3
-// MotorPID LiftMotor;
-// MotorPID Central_Axis_Motor;
+MotorPID Motor1;
+MotorPID Motor2;
+MotorPID Motor3;
 
 // This will be incremented in the heartbeat timer callback and set to 0 whenever a heartbeat is received from the ESP_H.
 volatile uint8_t missed_heartbeats = 0; // If we go into the heartbeat isr and this value is 3 or more we go to ESTOP immediately (connection lost)
@@ -125,6 +140,9 @@ void setup() {
 
     //Motor Initialization
     //TODO: change these pin definitions for upper
+    Motor1.init(MOTOR_1_ENCODER_A, MOTOR_1_ENCODER_B, MOTOR_1_PWM_1, MOTOR_1_PWM_2, ENABLE_PIN, MOTOR_1_CPR, LEDC_CHANNEL_0, LEDC_CHANNEL_1, MOTOR_1_KP, MOTOR_1_KI, MOTOR_1_KD, 10);
+    Motor2.init(MOTOR_2_ENCODER_A, MOTOR_2_ENCODER_B, MOTOR_2_PWM_1, MOTOR_2_PWM_2, ENABLE_PIN, MOTOR_2_CPR, LEDC_CHANNEL_2, LEDC_CHANNEL_3, MOTOR_2_KP, MOTOR_2_KI, MOTOR_2_KD, 10);
+    Motor3.init(MOTOR_3_ENCODER_A, MOTOR_3_ENCODER_B, MOTOR_3_PWM_1, MOTOR_3_PWM_2, ENABLE_PIN, MOTOR_3_CPR, LEDC_CHANNEL_4, LEDC_CHANNEL_5, MOTOR_3_KP, MOTOR_3_KI, MOTOR_3_KD, 10);
     // LiftMotor.init(LIFT_MOTOR_ENCODER_A, LIFT_MOTOR_ENCODER_B, LIFT_MOTOR_PWM_1, LIFT_MOTOR_PWM_2, ENABLE_PIN, LIFT_MOTOR_CPR, LEDC_CHANNEL_0,LEDC_CHANNEL_1, LIFT_MOTOR_KP, LIFT_MOTOR_KI, LIFT_MOTOR_KD, 10);
     // Central_Axis_Motor.init(CENTER_MOTOR_ENCODER_A, CENTER_MOTOR_ENCODER_B, CENTER_MOTOR_PWM_1, CENTER_MOTOR_PWM_2, ENABLE_PIN, CENTRAL_AXIS_CPR, LEDC_CHANNEL_2, LEDC_CHANNEL_3, CENTRAL_AXIS_KP, CENTRAL_AXIS_KI, CENTRAL_AXIS_KD, 10);
 }

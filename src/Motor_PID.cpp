@@ -147,6 +147,21 @@ IRAM_ATTR void MotorPID::update() {
         ledc_update_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_2);
     }else{
         // Position control
+        float position_value = (_raw_count / _countsPerRev) * 360.0f; // Convert count to degrees
+        _prev_err = _err;
+        _err = _targetPosition - position_value;
+        _Derr = _err - _prev_err;
+        _integral += _err * _Ki * (_timestep_ms / 1000.0f);
+        _currentPWM += _Kp * _err + _integral + (_Kd * _Derr)/(_timestep_ms / 1000.0f);
+        if(_currentPWM >= 0){
+            ledc_set_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_1, (uint32_t)_currentPWM);
+            ledc_set_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_2, 0);
+        } else {
+            ledc_set_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_1, 0);
+            ledc_set_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_2, (uint32_t)(-_currentPWM));
+        }
+        ledc_update_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_1);
+        ledc_update_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_2);
         //TODO: Write PID
     }
 }
