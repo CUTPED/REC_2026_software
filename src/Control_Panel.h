@@ -12,8 +12,8 @@
 // I2C
 #define SCL 22
 #define SDA 21
-#define N_EXT_ADD 0x20
-#define M_EXT_ADD 0x24
+#define N_EXT_ADD 0x24
+#define M_EXT_ADD 0x20
 #define LCD_ADD 0x3E
 #define RGB_ADD 0x7C
 
