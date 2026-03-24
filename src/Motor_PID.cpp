@@ -162,7 +162,6 @@ IRAM_ATTR void MotorPID::update() {
         }
         ledc_update_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_1);
         ledc_update_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_2);
-        //TODO: Write PID
     }
 }
 
@@ -198,10 +197,16 @@ void MotorPID::enable() {
     digitalWrite(_enablePin, HIGH);
 }
 
-void MotorPID::disable() {
+void IRAM_ATTR MotorPID::disable() {
     digitalWrite(_enablePin, LOW);
     ledc_set_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_1, 0);
     ledc_set_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_2, 0);
     ledc_update_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_1);
     ledc_update_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_2);
 }
+
+float MotorPID::getPos() {
+    float position_value = (_raw_count / _countsPerRev) * 360.0f; // Convert count to degrees
+    return position_value;
+}
+

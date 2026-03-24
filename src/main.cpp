@@ -30,6 +30,7 @@
 #define LIFT_MOTOR_PWM_2 33
 
 #define ENABLE_PIN 12
+#define SHUTDOWN_PIN 4
 
 #define LIFT_MOTOR_CPR 7974.4
 #define CENTRAL_AXIS_CPR 7974.4
@@ -61,16 +62,23 @@ hw_timer_t *ride_cycle_timer = NULL;
 // This is used for sending CAN messages (1KHz) and updating the PID controllers (100 Hz). 
 hw_timer_t *heartbeat_timer = NULL;
 
+TaskHandle_t POST_task_handle = NULL;
+
 MotorPID LiftMotor;
 MotorPID Central_Axis_Motor;
+
+ControlPanel controlPanel; // Global instance of the control panel still need to call init in setup
+
+//uint16_t error_code = 0; // This will be set to a non-zero value in the event of an error and can be sent over CAN and displayed on the LCD for diagnostics
 
 // This will be incremented in the heartbeat timer callback and set to 0 whenever a heartbeat is received from the ESP_H.
 uint8_t missed_heartbeats = 0; // If we go into the heartbeat isr and this value is 3 or more we go to ESTOP immediately (connection lost)
 
 void IRAM_ATTR estop_isr(){
     current_state = State::ESTOP; // Transition to ESTOP state immediately when the E-stop button is pressed
-    // TODO: This should also pull enable low on both drivers and pull shutdown low
-    // Enable will be part of motor class and shutdown will be in main
+    Central_Axis_Motor.disable();
+    LiftMotor.disable();
+    digitalWrite(SHUTDOWN_PIN, LOW); // Pull the shutdown pin low to the ride
 }
 
 volatile float secondary_motor_rpm_value = 0.0f; 
@@ -81,26 +89,38 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_e
     .buffer = rx_data,
     .buffer_len = sizeof(rx_data),
   };
-  if(ESP_OK == twai_node_receive_from_isr(handle, &rx_msg)){
-    //TODO: Compare recieved state to current state and stop if they dont match dont reset the missed heartbeat counter
+  if(ESP_OK == twai_node_receive_from_isr(handle, &rx_msg)){    
+    // ESP_H error
+    if(rx_msg.header.id == 0x10){ 
+        estop_isr();
+        //error_code logic
+    }
+    // Heartbeat
     if(rx_msg.header.id == 0x100){ // This is a heartbeat message
-        if(static_cast<uint8_t>(current_state) == rx_msg.buffer[0]){ // If the state sent by the ESP_H doesn't match our current state, something is wrong, so go to ESTOP
+        if(static_cast<uint8_t>(current_state) == rx_msg.buffer[0]){ // If the state sent by the ESP_H doesn't match our current state, it might mean a transtion between heartbeats but if it happens 3 times its a problem
             missed_heartbeats = 0;
         }
-    }else{
-        // TODO: others? There might be startup stuff this should also be for error frames
     }
-    // Serial.printf("Received CAN message with ID: 0x%X, Data: ", rx_msg.header.id);
-    for(int i = 0; i < rx_msg.buffer_len; i++){
-      Serial.printf("%d ", rx_msg.buffer[i]);
+    // Setup
+    if(rx_msg.header.id == 0x50){ 
+        ulNotifyGiveFromISR(POST_task_handle, pdTRUE); // Notify the POST task to continue the POST process
     }
-    Serial.println();
+    // TODO: Maintenance mode messages 
+    if(rx_msg.header.id == 0x200){ 
+        // Handle maintenance mode message idek what needs to be here
+    }
+
+    // for(int i = 0; i < rx_msg.buffer_len; i++){
+    //   Serial.printf("%d ", rx_msg.buffer[i]);
+    // }
+    // Serial.println();
   }
   return true;
 }
 
-uint8_t heartbeat_data[4] = {0,0,0,0}; 
+
 twai_node_handle_t twai_handle = NULL;
+uint8_t heartbeat_data[4] = {0,0,0,0}; 
 twai_frame_t heartbeat_msg = {
     .header ={
       .id = 0x100, // CAN message ID lower values are higher priority on the bus
@@ -136,18 +156,6 @@ void IRAM_ATTR heartbeat_timer_callback(){
 
 //TODO: Maintainence mode CAN messages are prolly important
 
-//FIXME: This sucks.
-void IRAM_ATTR ride_cycle_end(){
-    timerStop(ride_cycle_timer);
-    if(current_state == State::NORMAL){ // Only transition back to STOP if we're currently in NORMAL state, otherwise we might interrupt an ESTOP or MAINTANENCE cycle
-        current_state = State::STATIONARY; // Transition back to STOP state at the end of the ride cycle
-    }else{
-        current_state = State::ESTOP; // If we're not in NORMAL state at the end of the ride cycle, something went wrong, so transition to ESTOP
-    }
-}
-
-ControlPanel controlPanel; // Global instance of the control panel still need to call init in setup
-
 //Ride cycle stuff will be called in loop and will update target postions and velocities for motors
 void spinUpCycle(unsigned long timer_value){
     // This function will be called during the spin up phase of the ride cycle, it should ramp up the motors to their target speeds/positions over the course of the spin up time
@@ -165,11 +173,12 @@ void normalRideCycle(unsigned long timer_value){
     secondary_motor_rpm_value = MAX_SECONDARY_AXIS_RPM;
 }
 
-void spinDownCycle(unsigned long timer_value){
+//TODO: add a way to compute the early_stop_ratio based on where the lift is when we press ride stop.
+void spinDownCycle(unsigned long timer_value, float early_stop_ratio = 1.0f){ //early_stop_ratio represents where the motor was when we pressed ride stop.
     // This function will be called during the spin down phase of the ride cycle, it should ramp down the motors to 0 over the course of the spin down time
     float ramp_percentage = 1.0f - ((float)timer_value / SPIN_DOWN_TIME);
-    LiftMotor.setGoalPos(ramp_percentage * MAX_LIFT_POS);
-    Central_Axis_Motor.setGoalVelo(ramp_percentage * MAX_CENTRAL_AXIS_RPM);
+    LiftMotor.setGoalPos(ramp_percentage * MAX_LIFT_POS * early_stop_ratio);
+    Central_Axis_Motor.setGoalVelo(ramp_percentage * MAX_CENTRAL_AXIS_RPM * early_stop_ratio);
     secondary_motor_rpm_value = ramp_percentage * MAX_SECONDARY_AXIS_RPM;
 }
 
@@ -179,6 +188,9 @@ bool rideCycleHandler(unsigned long timer_value) {
     }else if(timer_value <= RIDE_CYCLE_TIME - SPIN_DOWN_TIME){
         normalRideCycle(timer_value - SPIN_UP_TIME);
     }else if(timer_value <= RIDE_CYCLE_TIME){
+        if(current_state == State::NORMAL){ 
+            current_state = State::STOPPING; // Transition to stopping state to start the spin down phase
+        }
         spinDownCycle(timer_value - (RIDE_CYCLE_TIME - SPIN_DOWN_TIME));
     } else{
         return false; // Ride cycle is over
@@ -188,31 +200,43 @@ bool rideCycleHandler(unsigned long timer_value) {
 
 
 // RESET SECTION
-
-// TODO: POST IS GONNA NEED TO BE A TASK THAT SHOULD HAVE PRIORITY OVER LOOP IT WONT RETURN ANYTHING (OR AT ALL)
-// IT SHOULD START THE HEARTBEAT PERFROM A BUNCH OF CHECKS USE vTaskDelayUntil TO MAKE SURE ESP_H HAS TIME TO BOOT AND RESPOND
-// THEN IT CAN SWITCH STATES TO STOP IF EVERYTHING CHECKS OUT, OR LEAVE US IN ESTOP IF NOT. 
-TaskHandle_t POST_task_handle = NULL;
-
 void POST_task(void* pvParameters){
   while(true){
 
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // The callback for reset should notify this task
-
     current_state = State::POST;
     // return power
-    missed_heartbeats = 0; // Reset missed heartbeats in case we were in ESTOP due to connection issues
-    controlPanel.setDisplayText("Running POST...");
-    vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay to allow ESP_H to boot
-    // send startup CAN message (startup should be distinct from heartbeats with a lower ID so it has higher prority on the bus)
-    // wait for notification from CAN ISR with a reasonable timeout if it timesout, stay in ESTOP
-    // otherwise start the heartbeat, and watchdog timers
-    // perform any other necessary startup checks here
-    // if everything checks out, transition to STOP, otherwise stay in ESTOP
-    //TODO: after supplying power, waiting and send the startup CAN message, we can wait for a notificaition from the recieve callback.
-    //FOR TESTING
-    vTaskDelay(3000 / portTICK_PERIOD_MS); 
-    current_state = State::STATIONARY; 
+    digitalWrite(SHUTDOWN_PIN, HIGH); // Pull the shutdown pin high to supply power to the ride
+    controlPanel.setDisplayText("POST","Powering Up");
+    vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay 1s to allow ESP_H to boot
+    controlPanel.setDisplayText("POST","Sending Setup");
+
+    uint8_t setup_data[4] = {2,0,0,0}; 
+    twai_frame_t setup_msg = {
+        .header ={
+        .id = 0x50, // CAN message ID lower values are higher priority on the bus
+        .ide = false, // This just means don't use extended frame format 
+        },
+        .buffer = (uint8_t*)setup_data, // Point to the data we want to send
+        .buffer_len = sizeof(setup_data), // This just specifies the length of the data we're sending, which is 1 byte in this case
+    };
+    ESP_ERROR_CHECK(twai_node_transmit(twai_handle, &setup_msg,0)); // Send the setup message to the ESP_H 
+    if(ulTaskNotifyTake(pdTRUE, 2000 / portTICK_PERIOD_MS) == 0){ // The callback for reset should notify this task
+        // If we don't receive a notification within 2 seconds, assume the ESP_H didn't boot properly and stay in ESTOP
+        estop_isr();
+        controlPanel.setDisplayText("ESTOP","No Handshake");
+    }else{ 
+        controlPanel.setDisplayText("POST","Final Checks");
+        // Start the heartbeat properly
+        missed_heartbeats = 0; // Reset missed heartbeats in case we were in ESTOP due to connection issues
+        delayMicroseconds(500); //phase offset to avoid all the messages coming at once and overwhelming the bus
+        heartbeat_timer_callback(); // Send a heartbeat immediately to let the ESP_H know we're alive and to reset the missed heartbeat counter on both sides
+        timerStart(heartbeat_timer); // Start the heartbeat timer to begin sending heartbeats and monitoring the connection to the ESP_H
+
+        //TODO: add the final list of motor checks we need
+        
+        current_state = State::STATIONARY; 
+    }
   }
 }
 
@@ -258,16 +282,19 @@ void setup() {
     );
     // Set up controll panel interrupts
     controlPanel.setResetCallback(reset_isr); // Set the reset callback to the reset_isr function 
-    // TODO: attach up input callback
+    controlPanel.setInputCallback(input_isr); // Set the input callback to the input_isr function that will handle state switching based on button inputs
     strcpy(text1, "ESTOP");
 
     //ride_cycle_timer setup
-    ride_cycle_timer = timerBegin(1000000); // Create a hardware timer with a prescaler of 80 (1 tick = 1 microsecond)
+    ride_cycle_timer = timerBegin(1000000); 
     timerAttachInterrupt(ride_cycle_timer, ride_cycle_end); // Attach the timer callback
     timerAlarm(ride_cycle_timer, RIDE_CYCLE_TIME * 1000, false, 0); // Set the timer to trigger at the end of every ride cycle and not auto-reload
     timerStop(ride_cycle_timer); // Start with the ride cycle timer stopped, it will be started when transitioning to NORMAL state
 
-    // TODO: Same for heartbeat timer 
+    heartbeat_timer = timerBegin(1000000); 
+    timerAttachInterrupt(heartbeat_timer, heartbeat_timer_callback); // Attach the timer callback
+    timerAlarm(heartbeat_timer, 1000, true, 0); // Set the timer to trigger every 1ms and auto-reload
+    timerStop(heartbeat_timer); // TODO: Start this in POST
 
     //Motor Initialization
     LiftMotor.init(LIFT_MOTOR_ENCODER_A, LIFT_MOTOR_ENCODER_B, LIFT_MOTOR_PWM_1, LIFT_MOTOR_PWM_2, ENABLE_PIN, LIFT_MOTOR_CPR, LEDC_CHANNEL_0,LEDC_CHANNEL_1, LIFT_MOTOR_KP, LIFT_MOTOR_KI, LIFT_MOTOR_KD, 10);
@@ -276,7 +303,7 @@ void setup() {
 
 void loop() {
     // TODO: Implement safety checks that can pull the state into ESTOP (Current monitoring, diag pins, etc.)
-    //TODO: Set LEDs according to the state using the control panel class.
+    // TODO: Set LEDs according to the state using the control panel class.
 
     switch (current_state) {
         case State::STATIONARY:
@@ -302,8 +329,6 @@ void loop() {
         case State::ESTOP:
             Serial.println("Currently in ESTOP state");
             strcpy(text1, "ESTOP");
-            // TODO: change the analog write to be a function call to the control panel class 
-
             //analogWrite(ESTOP_LED_PIN, 50); // Turn on the ESTOP LED 
             // if (reset_cycles > RESET_MIN_CYCLES){ // This is the amount of time the button must be held divided by the loop delay time (+10 for the debounce delay) to determine how many cycles the button needs to be held for
             //     reset_cycles = 0; // Reset the cycle count after transitioning to STOP state
@@ -322,91 +347,3 @@ void loop() {
     }
     controlPanel.setDisplayText(text1);
 }
-
-// SemaphoreHandle_t i2cMutex;
-// MCP23008 *mcp = nullptr; 
-
-// void updateCallback(uint8_t newState) {
-//     Serial.print("MCP23008 Interrupt! New state: ");
-//     for (int i = 7; i >= 0; i--) Serial.print((newState >> i) & 1);
-//     Serial.println();
-//     if(!(newState & 0x02)){ // If the second bit is low, that means the button connected to that pin was pressed (assuming active-low with pull-up)
-//         mcp->write_stage(0, true); // Set the first bit high to turn on the LED connected to that pin
-//     }else{
-//       mcp->write_stage(0, false); // Set the first bit high to turn on the LED connected to that pin
-//     }
-//     if(!(newState & 0x04)){ // If the third bit is low, that means the button connected to that pin was pressed (assuming active-low with pull-up)
-//         mcp->write_stage(3, true); // Set the fourth bit high to turn on the LED connected to that pin
-//     }else{
-//         mcp->write_stage(3, false); // Set the fourth bit high to turn on the LED connected to that pin
-//     }
-//     mcp->commit(); // Send the staged changes over I2C
-// }
-
-// void setup() {
-//     Serial.begin(115200);
-//     Wire.begin(SDA, SCL,400000); // Initialize I2C with specified SDA, SCL pins and fast mode (400kHz)
-//     i2cMutex = xSemaphoreCreateMutex();
-//     mcp = new MCP23008(i2cMutex); // Initialize the MCP23008 instance with the I2C mutex
-//     mcp->pinMode_stage(0, PIN_TYPE::PIN_OUTPUT);
-//     mcp->pinMode_stage(1, PIN_TYPE::PIN_PULLUP_INTERRUPT); 
-//     mcp->pinMode_stage(2, PIN_TYPE::PIN_PULLUP_INTERRUPT); 
-//     mcp->pinMode_stage(3, PIN_TYPE::PIN_OUTPUT);
-//     mcp->setUpdateCallback(updateCallback); // Set the interrupt callback function
-//     mcp->commit();
-// }
-
-// void loop(){
-//   Serial.println("Looping");
-//   vTaskDelay(1000 / portTICK_PERIOD_MS);  
-// }
-
-// #include <Arduino.h>
-// #include <Wire.h>
-// #include "interrupt.h"
-
-// void setup() {
-//   init();
-// }
-
-// void loop(){
-//   if(starting){
-//     start();
-//   }
-//   if(flag){
-//     response();
-//   }
-// }
-
-/*#include <Arduino.h>
-#include <Wire.h>
-
-#define EXTADD 0x20
-#define IODIR 0x00
-#define SCL 22
-#define SDA 21
-#define OLAT 0x0A
-#define GPIO 0x09
-void setup() {
-  Wire.begin(SDA, SCL);
-  Serial.begin(115200);
-  Wire.beginTransmission(EXTADD);
-  Wire.write(IODIR);
-  Wire.write(0x00);
-  Wire.endTransmission();
-}
- 
-void loop() {
-  Wire.beginTransmission(EXTADD);
-  Wire.write(GPIO);
-  Wire.write(0xff);
-  Wire.endTransmission();
-  Serial.println("1");
-  delay(1000);
-  Wire.beginTransmission(EXTADD);
-  Wire.write(GPIO);
-  Wire.write(0x00);
-  Wire.endTransmission();
-  Serial.println("0");
-  delay(1000);
-}*/

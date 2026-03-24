@@ -14,13 +14,14 @@ class MotorPID {
         MotorPID() = default;
         //This function needs pins for enc_A, enc_B, PWM1, PWM2, and enable, also it needs counts per rev, LEDC channel, and initial PID tunings.
         bool init(int enc_A_pin, int enc_B_pin, int pwm_pin_1, int pwm_pin_2, int enable_pin, float counts_per_rev, ledc_channel_t ledc_channel_1, ledc_channel_t ledc_channel_2, float Kp, float Ki, float Kd, int timestep_ms);
-        void update(); // TODO: Position
+        void update(); 
         void setGoalVelo(float goal); // Sets the target velocity in rpm
         void setGoalPos(float goal); // Sets the target position in degrees
         void setTunings(float Kp, float Ki, float Kd); // Sets the PID tunings
         void reset(); // Resets the PID controller (clears integral and sets previous error to 0, and resets pusle counter)
         void enable(); // Enables the motor (sets enable pin high)
         void disable(); // Disables the motor (sets enable pin low)
+        float getPos();
     private:
         volatile float _Kp;
         volatile float _Ki;
