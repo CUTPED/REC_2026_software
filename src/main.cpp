@@ -253,18 +253,31 @@ void IRAM_ATTR reset_isr(){
 
 void IRAM_ATTR input_isr(uint16_t buttonData){
     // TODO: Move state_switching logic to the callbacks (post and input are the only ones that should change to a state other than estop)
-    if(current_state==State::STATIONARY){
+    if(current_state==State::STOPPING){
+        if(!(buttonData & 0x4000)){
+            current_state = State::MAINTENANCE;
+        }
+        else if(/*reset?*/1){
+           
+        }
+    }
+    else if(current_state==State::STATIONARY){
         if(!(buttonData & 0x8)){
             estop_isr();
-        }
-        else if(!(buttonData & 0x4000)){
-            current_state = State::MAINTENANCE;
         }
         else if(!(buttonData & 0x70)){
             current_state = State::NORMAL;
         }
     }
-}
+    else if(current_state==State::NORMAL){
+        if(!(buttonData & 0x8)){
+            estop_isr();
+        }
+        else if(!(buttonData & 0x4)){
+            current_state = State::STATIONARY;
+        }
+    }
+ }
 
 //TODO: Maintainence Mode functions (This might become part of the input callback with a big if at the top)
 
