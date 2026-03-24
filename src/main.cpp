@@ -43,6 +43,9 @@
 #define CENTRAL_AXIS_KI 0.1f
 #define CENTRAL_AXIS_KD 0.05f
 
+#define CONTNUOUS_OPERATION true
+#define STATION_TIME 30000 // Time to stay in stationary state before transitioning to normal mode in continuous operation mode
+
 
 //State machine
 enum class State: uint8_t {
@@ -118,7 +121,6 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_e
   return true;
 }
 
-
 twai_node_handle_t twai_handle = NULL;
 uint8_t heartbeat_data[4] = {0,0,0,0}; 
 twai_frame_t heartbeat_msg = {
@@ -174,7 +176,8 @@ void normalRideCycle(unsigned long timer_value){
 }
 
 //TODO: add a way to compute the early_stop_ratio based on where the lift is when we press ride stop.
-void spinDownCycle(unsigned long timer_value, float early_stop_ratio = 1.0f){ //early_stop_ratio represents where the motor was when we pressed ride stop.
+float early_stop_ratio = 1.0f; // This will be a value between 0 and 1 that represents how far through the ride cycle we are when we press the stop button, it can be used to scale down the target speeds/positions during the spin down phase to create a smoother stop if we stop early in the ride cycle
+void spinDownCycle(unsigned long timer_value){ //early_stop_ratio represents where the motor was when we pressed ride stop.
     // This function will be called during the spin down phase of the ride cycle, it should ramp down the motors to 0 over the course of the spin down time
     float ramp_percentage = 1.0f - ((float)timer_value / SPIN_DOWN_TIME);
     LiftMotor.setGoalPos(ramp_percentage * MAX_LIFT_POS * early_stop_ratio);
@@ -182,22 +185,13 @@ void spinDownCycle(unsigned long timer_value, float early_stop_ratio = 1.0f){ //
     secondary_motor_rpm_value = ramp_percentage * MAX_SECONDARY_AXIS_RPM;
 }
 
-bool rideCycleHandler(unsigned long timer_value) {
+void rideCycleHandler(unsigned long timer_value) {
     if(timer_value <= SPIN_UP_TIME){
         spinUpCycle(timer_value);
     }else if(timer_value <= RIDE_CYCLE_TIME - SPIN_DOWN_TIME){
         normalRideCycle(timer_value - SPIN_UP_TIME);
-    }else if(timer_value <= RIDE_CYCLE_TIME){
-        if(current_state == State::NORMAL){ 
-            current_state = State::STOPPING; // Transition to stopping state to start the spin down phase
-        }
-        spinDownCycle(timer_value - (RIDE_CYCLE_TIME - SPIN_DOWN_TIME));
-    } else{
-        return false; // Ride cycle is over
     }
-    return true; 
 }
-
 
 // RESET SECTION
 void POST_task(void* pvParameters){
@@ -233,9 +227,18 @@ void POST_task(void* pvParameters){
         heartbeat_timer_callback(); // Send a heartbeat immediately to let the ESP_H know we're alive and to reset the missed heartbeat counter on both sides
         timerStart(heartbeat_timer); // Start the heartbeat timer to begin sending heartbeats and monitoring the connection to the ESP_H
 
-        //TODO: add the final list of motor checks we need
-        
-        current_state = State::STATIONARY; 
+        //TODO: add the final list of motor checks we need (includeing ride off = 0)
+
+
+        maintainence_mode = !(controlPanel.getState() & (1 << 14));
+        normal_mode = !(controlPanel.getState() & (1 << 15));
+        if(maintence_mode && !normal_mode){
+            current_state = State::MAINTENANCE;
+        }else if(normal_mode && !maintence_mode){  
+            current_state = State::STATIONARY; 
+        }else{
+            estop_isr();
+        }
     }
   }
 }
@@ -253,31 +256,71 @@ void IRAM_ATTR reset_isr(){
 
 void IRAM_ATTR input_isr(uint16_t buttonData){
     // TODO: Move state_switching logic to the callbacks (post and input are the only ones that should change to a state other than estop)
-    if(current_state==State::STOPPING){
-        if(!(buttonData & 0x4000)){
-            current_state = State::MAINTENANCE;
-        }
-        else if(/*reset?*/1){
-           
-        }
+
+    if(current_state == State::ESTOP){
+        //do nothing since there is no escape outside of the reset callback defined elsewhere
+        estop_isr(); // this is reduntant but you know its good in case athe shutdown pin is not set propererly or smth 
+        return;
     }
-    else if(current_state==State::STATIONARY){
-        if(!(buttonData & 0x8)){
-            estop_isr();
-        }
-        else if(!(buttonData & 0x70)){
-            current_state = State::NORMAL;
-        }
+    if(current_state == State::POST){
+        //do nothing since the POST process handles its own state transitions. no buttons should affect that
+        return;
     }
-    else if(current_state==State::NORMAL){
-        if(!(buttonData & 0x8)){
-            estop_isr();
+    if(!(buttonData & (1<<3))){ // E-stop button or other power loss
+        estop_isr(); 
+        return;
+    }
+    if(current_state == State::STATIONARY){
+        if(!(buttonData & (1<<4))){ // Dispatch button 1
+            if(!(buttonData & (1<<5 & 1<<7))){ // Dispatch lock and panel 2
+                current_state = State::NORMAL;
+                //restart the ride cycle timer
+                timerRestart(ride_cycle_timer);
+                timerAlarm(ride_cycle_timer, (RIDE_CYCLE_TIME-SPIN_DOWN_TIME) * 1000, false, 0); // Set the timer to trigger at the end of every ride cycle and not auto-reload
+                timerStart(ride_cycle_timer); 
+                //TODO: add text to LCD
+            }else{
+                //TODO: add text to LCD about rejecting dispatch due to lock or panel 2
+            }
         }
-        else if(!(buttonData & 0x4)){
+        return;
+    }
+    if(current_state==State::NORMAL){
+        if(!(buttonData & (1<<2))){ // Stop button
+            early_stop_ratio = (float)LiftMotor.getCurrentPos() / MAX_LIFT_POS; // Compute the early stop ratio based on the current position of the lift when we stop the ride
             current_state = State::STOPPING;
         }
     }
- }
+
+    if(current_state==State::STOPPING){
+        // Outside of ESTOP a transition from here is time based so use ride_event_isr
+        return;
+    }
+    if(current_state == State::MAINTENANCE){
+        //TODO: Later problem 
+    }
+}
+
+void IRAM_ATTR ride_event_isr(){
+    // This is the ISR for the ride event timer, it will handles transitions from running to stoped and stuff
+    if(current_state == State::NORMAL){
+        current_state = State::STOPPING;
+        early_stop_ratio = (float)liftMotor.getCurrentPos() / MAX_LIFT_POS; // Compute the early stop ratio based on the current position of the lift when we stop the ride 
+        timerRestart(ride_cycle_timer);
+        timerAlarm(ride_cycle_timer, SPIN_DOWN_TIME * 1000, false, 0); // Set the timer to trigger at the end of every ride cycle and not auto-re
+        timerStart(ride_cycle_timer);
+    }
+
+    if(current_state == State::STOPPING){
+        current_state = State::STATIONARY; // Transition to stationary state at the end of the ride cycle
+        if(CONTNUOUS_OPERATION){
+            timerRestart(ride_cycle_timer); 
+            timerAlarm(ride_cycle_timer, STATION_TIME*1000, false, 0); // Set the timer to trigger after the station time to transition back to normal mode in continuous operation mode
+            timerStart(ride_cycle_timer);
+        }
+    }
+}
+
 
 //TODO: Maintainence Mode functions (This might become part of the input callback with a big if at the top)
 
@@ -300,7 +343,7 @@ void setup() {
 
     //ride_cycle_timer setup
     ride_cycle_timer = timerBegin(1000000); 
-    timerAttachInterrupt(ride_cycle_timer, ride_cycle_end); // Attach the timer callback
+    timerAttachInterrupt(ride_cycle_timer, ride_event_isr); // Attach the timer callback 
     timerAlarm(ride_cycle_timer, RIDE_CYCLE_TIME * 1000, false, 0); // Set the timer to trigger at the end of every ride cycle and not auto-reload
     timerStop(ride_cycle_timer); // Start with the ride cycle timer stopped, it will be started when transitioning to NORMAL state
 
