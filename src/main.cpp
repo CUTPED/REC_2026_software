@@ -53,6 +53,7 @@ enum class State: uint8_t {
     MAINTENANCE = 6,
 };
 volatile State current_state = State::ESTOP;
+char text1[16];                                                                                                                                                                                       
 
 // Timers will be created in setup heartbeat gets started in POST
 // This is the ride cycle timer, started when transitioning from AWAITING_DISPATCH to NORMAL, and will be used to track the ride cycle and return to stop state
@@ -64,7 +65,7 @@ MotorPID LiftMotor;
 MotorPID Central_Axis_Motor;
 
 // This will be incremented in the heartbeat timer callback and set to 0 whenever a heartbeat is received from the ESP_H.
-fuint8_t missed_heartbeats = 0; // If we go into the heartbeat isr and this value is 3 or more we go to ESTOP immediately (connection lost)
+uint8_t missed_heartbeats = 0; // If we go into the heartbeat isr and this value is 3 or more we go to ESTOP immediately (connection lost)
 
 void IRAM_ATTR estop_isr(){
     current_state = State::ESTOP; // Transition to ESTOP state immediately when the E-stop button is pressed
@@ -226,6 +227,21 @@ void IRAM_ATTR reset_isr(){
     }
 }
 
+void IRAM_ATTR input_isr(uint16_t buttonData){
+    // TODO: Move state_switching logic to the callbacks (post and input are the only ones that should change to a state other than estop)
+    if(current_state==State::STATIONARY){
+        if(!(buttonData & 0x8)){
+            estop_isr();
+        }
+        else if(!(buttonData & 0x4000)){
+            current_state = State::MAINTENANCE;
+        }
+        else if(!(buttonData & 0x70)){
+            current_state = State::NORMAL;
+        }
+    }
+}
+
 //TODO: Maintainence Mode functions (This might become part of the input callback with a big if at the top)
 
 void setup() {
@@ -243,7 +259,7 @@ void setup() {
     // Set up controll panel interrupts
     controlPanel.setResetCallback(reset_isr); // Set the reset callback to the reset_isr function 
     // TODO: attach up input callback
-
+    strcpy(text1, "ESTOP");
 
     //ride_cycle_timer setup
     ride_cycle_timer = timerBegin(1000000); // Create a hardware timer with a prescaler of 80 (1 tick = 1 microsecond)
@@ -260,13 +276,12 @@ void setup() {
 
 void loop() {
     // TODO: Implement safety checks that can pull the state into ESTOP (Current monitoring, diag pins, etc.)
+    //TODO: Set LEDs according to the state using the control panel class.
 
-    // TODO: Move state_switching logic to the callbacks (post and input are the only ones that should change to a state other than estop)
-
-    //TODO: Add text to the LCD and set LEDs according to the state using the control panel class.
     switch (current_state) {
         case State::STATIONARY:
             Serial.println("Currently in STATIONARY state");
+            strcpy(text1, "STATIONARY");
             // if (dispatch_pressed) {
             //     current_state = State::NORMAL;
             //     Serial.println("Transitioning to NORMAL state");
@@ -278,6 +293,7 @@ void loop() {
             break;
         case State::NORMAL:
             Serial.println("Currently in NORMAL state");
+            strcpy(text1, "NORMAL");
             // if(!rideCycleHandler(timerRead(ride_cycle_timer))){ // This checks if the ride cycle timer has reached the end of the ride cycle, and if so, it will transition back to STOP state. This is a non-blocking way to handle the ride cycle timing.
             //     current_state = State::STOP;
             //     Serial.println("Ride cycle ended, transitioning back to STOP state");
@@ -285,6 +301,7 @@ void loop() {
             break;
         case State::ESTOP:
             Serial.println("Currently in ESTOP state");
+            strcpy(text1, "ESTOP");
             // TODO: change the analog write to be a function call to the control panel class 
 
             //analogWrite(ESTOP_LED_PIN, 50); // Turn on the ESTOP LED 
@@ -300,8 +317,10 @@ void loop() {
             break;
         case State::MAINTENANCE:
             Serial.println("Currently in MAINTENANCE state");
+            strcpy(text1, "MAINTENANCE");
             break;
     }
+    controlPanel.setDisplayText(text1);
 }
 
 // SemaphoreHandle_t i2cMutex;

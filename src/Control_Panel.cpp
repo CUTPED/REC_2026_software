@@ -13,6 +13,7 @@ bool ControlPanel::init() {
     // LCD
     _lcd.init();
     //We can set rgb if we want i think idk if the lcd we have can do that??
+    //We can't do rgb but we can choose brightness and the blue, gray or green
 
     // Extenders
     if(!_normal_extender.init(_i2cMutex, N_INT_PIN, N_EXT_ADD)){
@@ -70,30 +71,30 @@ uint16_t ControlPanel::getState() {
 void ControlPanel::setDisplayText(const char* line1,bool force) {    
     if(force || (strcmp(line1, _displayLine1) !=0)){
         xSemaphoreTake(_i2cMutex, portMAX_DELAY);
+        strcpy(_displayLine1, line1);
         _lcd.clear();
         _lcd.setCursor(0, 0);
         _lcd.print(line1);
         xSemaphoreGive(_i2cMutex);
-        strcpy(_displayLine1, line1);
     }
 }
 
 void ControlPanel::setDisplayText(const char* line1, const char* line2,bool force) {    
     if(force || (strcmp(line1, _displayLine1) !=0)){
         xSemaphoreTake(_i2cMutex, portMAX_DELAY);
+        strcpy(_displayLine1, line1);
         _lcd.clear();
         _lcd.setCursor(0, 0);
         _lcd.print(line1);
         xSemaphoreGive(_i2cMutex);
-        strcpy(_displayLine1, line1);
     }
     if(force || (strcmp(line2, _displayLine2) !=0)){
         xSemaphoreTake(_i2cMutex, portMAX_DELAY);
+        strcpy(_displayLine2, line2);
         _lcd.clear();
         _lcd.setCursor(0, 1);
         _lcd.print(line2);
         xSemaphoreGive(_i2cMutex);
-        strcpy(_displayLine2, line2);
     }
 }
 

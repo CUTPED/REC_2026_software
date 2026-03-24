@@ -14,8 +14,8 @@
 #define SDA 21
 #define N_EXT_ADD 0x20
 #define M_EXT_ADD 0x24
-#define LCD_ADD 0x7C
-#define RGB_ADD 0xC0
+#define LCD_ADD 0x3E
+#define RGB_ADD 0x7C
 
 // Pin Assignments
 
@@ -107,8 +107,13 @@ class ControlPanel {
         //For these variables a 0 represents a button that is pressed or a limit switch that is triggered, and a 1 represents a button that is not pressed or a limit switch that is not triggered
         uint16_t volatile _state; 
         uint16_t volatile _prevState; // This will store the previous state to detect changes
-        char *_displayLine1; // This will store the current text to be displayed on the LCD 
-        char *_displayLine2; // This will store the current text to be displayed on the LCD 
+        char text1[16];
+        char text2[16];
+        /*char *_displayLine1; // This will store the current text to be displayed on the LCD 
+        char *_displayLine2;*/ // This will store the current text to be displayed on the LCD 
+
+        char _displayLine1[17] = {0};
+        char _displayLine2[17] = {0};
 
         uint16_t _resetHoldTime = 3000; // Default to 3 seconds, this is the amount of time the reset button needs to be held down to trigger the reset callback
         hw_timer_t *_resetTimer;
