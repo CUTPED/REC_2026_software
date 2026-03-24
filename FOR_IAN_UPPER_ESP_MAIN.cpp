@@ -11,7 +11,6 @@
 
 #define MAX_SECONDARY_AXIS_RPM 135.0f // Maximum secondary axis RPM 
 
-//TODO: change these pin definitions for upper
 #define MOTOR_1_ENCODER_A 4
 #define MOTOR_1_ENCODER_B 5
 #define MOTOR_2_ENCODER_A 18
@@ -28,17 +27,14 @@
 
 #define ENABLE_PIN 13
 
-// #degine OCM_1 SENSOR_VP
-// #define OCM_2 SENSOR_VN
+// #degine OCM_1 36
+// #define OCM_2 39
 // #define OCM_3 35
 
-//TODO: change these CPR values for upper motors
 #define MOTOR_1_CPR 960
 #define MOTOR_2_CPR 960
 #define MOTOR_3_CPR 960
 
-
-//TODO: change these PID tunings same for all upper motors
 #define MOTOR_1_KP 0.5f
 #define MOTOR_1_KI 0.1f
 #define MOTOR_1_KD 0.05f
@@ -68,14 +64,14 @@ volatile State current_state = State::POST;
 hw_timer_t *heartbeat_timer = NULL;
 twai_node_handle_t twai_handle = NULL;
 
-// TODO: new motors same class x3
 MotorPID Motor1;
 MotorPID Motor2;
 MotorPID Motor3;
 
+float secondary_motors_target = 0.0f;
+
 // This will be incremented in the heartbeat timer callback and set to 0 whenever a heartbeat is received from the ESP_H.
 volatile uint8_t missed_heartbeats = 0; // If we go into the heartbeat isr and this value is 3 or more we go to ESTOP immediately (connection lost)
-
 
 static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_event_data_t* event_data, void* user_ctx){
     uint8_t rx_data[4];
@@ -84,67 +80,100 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_e
     .buffer_len = sizeof(rx_data),
   };
   if(ESP_OK == twai_node_receive_from_isr(handle, &rx_msg)){
-    //TODO: (Felix) Compare recieved state to current state and stop if they dont match dont reset the missed heartbeat counter
-    if(rx_msg.header.id == 0x100){ // This is a heartbeat message
-        if(static_cast<uint8_t>(current_state) == rx_msg.buffer[0]){ // If the state sent by the ESP_H doesn't match our current state, something is wrong, so go to ESTOP
-            missed_heartbeats = 0;
+    if(rx_msg.header.id == 0x10){ 
+        estop_isr();
+        //error_code logic
+    }else if(rx_msg.header.id == 0x100){ // This is a heartbeat message
+        current_state = static_cast<State>(rx_msg.buffer[0]); // Update our current state based on the heartbeat message from the ESP_H, this will help ensure we're in the correct state after a reset and can also be used to detect if we missed a state transition
+        if (current_state == STATE::NORMAL){
+            Motor1.enable();
+            Motor2.enable();
+            Motor3.enable();
         }
-    }else{
-        // TODO: (Felix) others I think this is just for startup?
+        secondary_motors_target = (float)rx_msg.buffer[1]; // Update the target speed for the secondary motors based on the heartbeat message from the ESP_H, this is just an example of how we can send additional data in the heartbeat message and use it to control the motors
+        Motor1.setGoalVelo(secondary_motors_target);
+        Motor2.setGoalVelo(secondary_motors_target);
+        Motor3.setGoalVelo(secondary_motors_target);
+        
+    }else if(rx_msg.header.id == 0x50){
+        current_state = State::POST; 
+        uint8_t setup_data[4] = {2,0,0,0}; 
+        twai_frame_t setup_msg = {
+            .header ={
+            .id = 0x50, // CAN message ID lower values are higher priority on the bus
+            .ide = false, // This just means don't use extended frame format 
+            },
+            .buffer = (uint8_t*)setup_data, // Point to the data we want to send
+            .buffer_len = sizeof(setup_data), // This just specifies the length of the data we're sending, which is 1 byte in this case
+        };
+        ESP_ERROR_CHECK(twai_node_transmit(twai_handle, &setup_msg, 0));
+        timerStart(heartbeat_timer); // Start the heartbeat timer to begin sending heartbeats and monitoring the connection to the ESP_H, we start it here because we want to wait until we receive the setup message back from the ESP_H before we start monitoring the connection
     }
-    // Serial.printf("Received CAN message with ID: 0x%X, Data: ", rx_msg.header.id);
-    for(int i = 0; i < rx_msg.buffer_len; i++){
-      Serial.printf("%d ", rx_msg.buffer[i]);
-    }
-    Serial.println();
+    // for(int i = 0; i < rx_msg.buffer_len; i++){
+    //   Serial.printf("%d ", rx_msg.buffer[i]);
+    // }
+    // Serial.println();
   }
   return true;
 }
 
 //TODO: (Felix) Add Heartbeat ISR for Ian's stuff and sending CAN messages and incrementing missed_heartbeats (also have it trigger E-stop if we miss 3 heartbeats in a row)
-uint8_t ERIN = 0;
-void IRAM_ATTR heartbeat_timer_callback(){
-    missed_heartbeats++;
-    //TODO: Put the motor updates here (also rename ERIN unless you want her to be the heartbeat counter that ensures pid updates are 100 Hz) this really just needs to be motor.update() for each motor and reset ERIN you should do the PID position section of the Motor_PID class 
 
-    if(missed_heartbeats >= 3){
-        //ERROR_CODE = n // TODO: set an error code for missed heartbeats that can be sent over CAN and displayed on the LCD
-        estop_isr(); // If we miss 3 heartbeats in a row, go to ESTOP
+uint8_t heartbeat_data[4] = {0,0,0,0}; 
+twai_frame_t heartbeat_msg = {
+    .header ={
+      .id = 0x100, // CAN message ID lower values are higher priority on the bus
+      .ide = false, // This just means don't use extended frame format 
+    },
+    .buffer = (uint8_t*)heartbeat_data, // Point to the data we want to send
+    .buffer_len = sizeof(heartbeat_data), // This just specifies the length of the data we're sending, which is 1 byte in this case
+};
+
+uint8_t pid_update_counter = 0;
+
+void IRAM_ATTR heartbeat_timer_callback(){
+    if (pid_update_counter >= 10){ // Update PID controllers every 10ms (100 Hz)
+        Motor1.update();
+        Motor2.update();
+        Motor3.update();
+        pid_update_counter = 0;
     }
 
+    heartbeat_data[0] = static_cast<uint8_t>(current_state); // Send the current state in the heartbeat message, you can also add other data here if needed
+    heartbeat_data[1] = (uint8_t)secondary_motor_rpm_value; 
+    heartbeat_data[2] = 0; // These bits will be used in maintainence mode
+    heartbeat_data[3] = 0; 
+    memcpy(heartbeat_msg.buffer, (uint8_t*)heartbeat_data, sizeof(heartbeat_data)); // Update the data field of the CAN message with the current value of x
+    ESP_ERROR_CHECK(twai_node_transmit(twai_handle, &heartbeat_msg,0));
+
+    pid_update_counter++;
 }
 
 void IRAM_ATTR estop_isr(){
     current_state = State::ESTOP; // Transition to ESTOP state immediately when the E-stop button is pressed
-    // TODO: This should also pull enable low and send emergency CAN message
+    Motor1.disable();
+    Motor2.disable();
+    Motor3.disable();
 }
-
-// RESET SECTION
-
-// TODO: POST should be very simple for the upper esp (it boots into post state) it can run entirely in loop 
-// like it should just repeatedly check its error pins while it waits to finish setup with the lower one
-
 
 //TODO: Maintainence Mode functions theses should be short just make sure that when it gets a CAN message to move a motor it does that
 
 void setup() {
     Serial.begin(115200);
-    
-    // TODO: Set up heartbeat timer
-
+    heartbeat_timer = timerBegin(1000000); 
+    timerAttachInterrupt(heartbeat_timer, heartbeat_timer_callback); // Attach the timer callback
+    timerAlarm(heartbeat_timer, 1000, true, 0); // Set the timer to trigger every 1ms and auto-reload
+    timerStop(heartbeat_timer); 
     // TODO: pinModes for diag, and ocm
+
     // TODO: Write DIAG interrupt for ESTOP and attach to (maybe just attach to estop_isr)
     // Reach goal would be to have it send a CAN message with a useful error code to report on the LCD like an error frame?
 
-    // TODO: (Felix) Set up CAN with the appropriate callbacks and stuff
-
     //Motor Initialization
-    //TODO: change these pin definitions for upper
     Motor1.init(MOTOR_1_ENCODER_A, MOTOR_1_ENCODER_B, MOTOR_1_PWM_1, MOTOR_1_PWM_2, ENABLE_PIN, MOTOR_1_CPR, LEDC_CHANNEL_0, LEDC_CHANNEL_1, MOTOR_1_KP, MOTOR_1_KI, MOTOR_1_KD, 10);
     Motor2.init(MOTOR_2_ENCODER_A, MOTOR_2_ENCODER_B, MOTOR_2_PWM_1, MOTOR_2_PWM_2, ENABLE_PIN, MOTOR_2_CPR, LEDC_CHANNEL_2, LEDC_CHANNEL_3, MOTOR_2_KP, MOTOR_2_KI, MOTOR_2_KD, 10);
     Motor3.init(MOTOR_3_ENCODER_A, MOTOR_3_ENCODER_B, MOTOR_3_PWM_1, MOTOR_3_PWM_2, ENABLE_PIN, MOTOR_3_CPR, LEDC_CHANNEL_4, LEDC_CHANNEL_5, MOTOR_3_KP, MOTOR_3_KI, MOTOR_3_KD, 10);
-    // LiftMotor.init(LIFT_MOTOR_ENCODER_A, LIFT_MOTOR_ENCODER_B, LIFT_MOTOR_PWM_1, LIFT_MOTOR_PWM_2, ENABLE_PIN, LIFT_MOTOR_CPR, LEDC_CHANNEL_0,LEDC_CHANNEL_1, LIFT_MOTOR_KP, LIFT_MOTOR_KI, LIFT_MOTOR_KD, 10);
-    // Central_Axis_Motor.init(CENTER_MOTOR_ENCODER_A, CENTER_MOTOR_ENCODER_B, CENTER_MOTOR_PWM_1, CENTER_MOTOR_PWM_2, ENABLE_PIN, CENTRAL_AXIS_CPR, LEDC_CHANNEL_2, LEDC_CHANNEL_3, CENTRAL_AXIS_KP, CENTRAL_AXIS_KI, CENTRAL_AXIS_KD, 10);
+    
 }
 
 void loop() {
@@ -159,6 +188,7 @@ void loop() {
 
             //TODO: (Erin) Lights and stuff
             break;
+        case State::STOPPING:
         case State::NORMAL:
             // TODO: monitor pins OCM should get an upper bound and diag should be assumed ok since the interrupt from setup should take care of it
 

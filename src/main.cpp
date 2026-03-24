@@ -99,17 +99,18 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_e
         //error_code logic
     }
     // Heartbeat
-    if(rx_msg.header.id == 0x100){ // This is a heartbeat message
+    else if(rx_msg.header.id == 0x100){ // This is a heartbeat message
         if(static_cast<uint8_t>(current_state) == rx_msg.buffer[0]){ // If the state sent by the ESP_H doesn't match our current state, it might mean a transtion between heartbeats but if it happens 3 times its a problem
             missed_heartbeats = 0;
         }
     }
     // Setup
-    if(rx_msg.header.id == 0x50){ 
-        ulNotifyGiveFromISR(POST_task_handle, pdTRUE); // Notify the POST task to continue the POST process
+    else if(rx_msg.header.id == 0x50){ 
+        BaseType_t higherPriorityTaskWoken = pdFALSE;
+        vTaskNotifyGiveFromISR(POST_task_handle, &higherPriorityTaskWoken);
     }
     // TODO: Maintenance mode messages 
-    if(rx_msg.header.id == 0x200){ 
+    else if(rx_msg.header.id == 0x200){ 
         // Handle maintenance mode message idek what needs to be here
     }
 
@@ -196,7 +197,6 @@ void rideCycleHandler(unsigned long timer_value) {
 // RESET SECTION
 void POST_task(void* pvParameters){
   while(true){
-
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // The callback for reset should notify this task
     current_state = State::POST;
     // return power
@@ -230,11 +230,11 @@ void POST_task(void* pvParameters){
         //TODO: add the final list of motor checks we need (includeing ride off = 0)
 
 
-        maintainence_mode = !(controlPanel.getState() & (1 << 14));
-        normal_mode = !(controlPanel.getState() & (1 << 15));
-        if(maintence_mode && !normal_mode){
+        bool maintainence_mode = !(controlPanel.getState() & (1 << 14));
+        bool normal_mode = !(controlPanel.getState() & (1 << 15));
+        if(maintainence_mode && !normal_mode){
             current_state = State::MAINTENANCE;
-        }else if(normal_mode && !maintence_mode){  
+        }else if(normal_mode && !maintainence_mode){  
             current_state = State::STATIONARY; 
         }else{
             estop_isr();
@@ -273,6 +273,8 @@ void IRAM_ATTR input_isr(uint16_t buttonData){
     if(current_state == State::STATIONARY){
         if(!(buttonData & (1<<4))){ // Dispatch button 1
             if(!(buttonData & (1<<5 & 1<<7))){ // Dispatch lock and panel 2
+                LiftMotor.enable();
+                Central_Axis_Motor.enable();
                 current_state = State::NORMAL;
                 //restart the ride cycle timer
                 timerRestart(ride_cycle_timer);
@@ -287,7 +289,7 @@ void IRAM_ATTR input_isr(uint16_t buttonData){
     }
     if(current_state==State::NORMAL){
         if(!(buttonData & (1<<2))){ // Stop button
-            early_stop_ratio = (float)LiftMotor.getCurrentPos() / MAX_LIFT_POS; // Compute the early stop ratio based on the current position of the lift when we stop the ride
+            early_stop_ratio = (float)LiftMotor.getPos() / MAX_LIFT_POS; // Compute the early stop ratio based on the current position of the lift when we stop the ride
             current_state = State::STOPPING;
         }
     }
@@ -305,7 +307,7 @@ void IRAM_ATTR ride_event_isr(){
     // This is the ISR for the ride event timer, it will handles transitions from running to stoped and stuff
     if(current_state == State::NORMAL){
         current_state = State::STOPPING;
-        early_stop_ratio = (float)liftMotor.getCurrentPos() / MAX_LIFT_POS; // Compute the early stop ratio based on the current position of the lift when we stop the ride 
+        early_stop_ratio = (float)LiftMotor.getPos() / MAX_LIFT_POS; // Compute the early stop ratio based on the current position of the lift when we stop the ride 
         timerRestart(ride_cycle_timer);
         timerAlarm(ride_cycle_timer, SPIN_DOWN_TIME * 1000, false, 0); // Set the timer to trigger at the end of every ride cycle and not auto-re
         timerStart(ride_cycle_timer);
@@ -316,6 +318,17 @@ void IRAM_ATTR ride_event_isr(){
         if(CONTNUOUS_OPERATION){
             timerRestart(ride_cycle_timer); 
             timerAlarm(ride_cycle_timer, STATION_TIME*1000, false, 0); // Set the timer to trigger after the station time to transition back to normal mode in continuous operation mode
+            timerStart(ride_cycle_timer);
+        }
+    }
+
+    if(current_state == State::STATIONARY){
+        if(CONTNUOUS_OPERATION){
+            LiftMotor.enable();
+            Central_Axis_Motor.enable();
+            current_state = State::NORMAL; // Transition back to normal state after the station time in continuous operation mode
+            timerRestart(ride_cycle_timer); 
+            timerAlarm(ride_cycle_timer, (RIDE_CYCLE_TIME-SPIN_DOWN_TIME) * 1000, false, 0); // Set the timer to trigger at the end of every ride cycle and not auto-reload
             timerStart(ride_cycle_timer);
         }
     }
@@ -344,13 +357,13 @@ void setup() {
     //ride_cycle_timer setup
     ride_cycle_timer = timerBegin(1000000); 
     timerAttachInterrupt(ride_cycle_timer, ride_event_isr); // Attach the timer callback 
-    timerAlarm(ride_cycle_timer, RIDE_CYCLE_TIME * 1000, false, 0); // Set the timer to trigger at the end of every ride cycle and not auto-reload
+    timerAlarm(ride_cycle_timer, (RIDE_CYCLE_TIME-SPIN_DOWN_TIME) * 1000, false, 0); // Set the timer to trigger at the end of every ride cycle and not auto-reload
     timerStop(ride_cycle_timer); // Start with the ride cycle timer stopped, it will be started when transitioning to NORMAL state
 
     heartbeat_timer = timerBegin(1000000); 
     timerAttachInterrupt(heartbeat_timer, heartbeat_timer_callback); // Attach the timer callback
     timerAlarm(heartbeat_timer, 1000, true, 0); // Set the timer to trigger every 1ms and auto-reload
-    timerStop(heartbeat_timer); // TODO: Start this in POST
+    timerStop(heartbeat_timer); 
 
     //Motor Initialization
     LiftMotor.init(LIFT_MOTOR_ENCODER_A, LIFT_MOTOR_ENCODER_B, LIFT_MOTOR_PWM_1, LIFT_MOTOR_PWM_2, ENABLE_PIN, LIFT_MOTOR_CPR, LEDC_CHANNEL_0,LEDC_CHANNEL_1, LIFT_MOTOR_KP, LIFT_MOTOR_KI, LIFT_MOTOR_KD, 10);
