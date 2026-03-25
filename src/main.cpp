@@ -57,7 +57,8 @@ enum class State: uint8_t {
     MAINTENANCE = 6,
 };
 volatile State current_state = State::ESTOP;
-char text1[16];                                                                                                                                                                                       
+char text1[16];      
+uint8_t led_value;                                                                                                                                                                                
 
 // Timers will be created in setup heartbeat gets started in POST
 // This is the ride cycle timer, started when transitioning from AWAITING_DISPATCH to NORMAL, and will be used to track the ride cycle and return to stop state
@@ -378,6 +379,8 @@ void loop() {
         case State::STATIONARY:
             Serial.println("Currently in STATIONARY state");
             strcpy(text1, "STATIONARY");
+            led_value = 0;
+
             // if (dispatch_pressed) {
             //     current_state = State::NORMAL;
             //     Serial.println("Transitioning to NORMAL state");
@@ -390,6 +393,7 @@ void loop() {
         case State::NORMAL:
             Serial.println("Currently in NORMAL state");
             strcpy(text1, "NORMAL");
+            led_value = 1;
             // if(!rideCycleHandler(timerRead(ride_cycle_timer))){ // This checks if the ride cycle timer has reached the end of the ride cycle, and if so, it will transition back to STOP state. This is a non-blocking way to handle the ride cycle timing.
             //     current_state = State::STOP;
             //     Serial.println("Ride cycle ended, transitioning back to STOP state");
@@ -398,6 +402,7 @@ void loop() {
         case State::ESTOP:
             Serial.println("Currently in ESTOP state");
             strcpy(text1, "ESTOP");
+            led_value = 2;
             //analogWrite(ESTOP_LED_PIN, 50); // Turn on the ESTOP LED 
             // if (reset_cycles > RESET_MIN_CYCLES){ // This is the amount of time the button must be held divided by the loop delay time (+10 for the debounce delay) to determine how many cycles the button needs to be held for
             //     reset_cycles = 0; // Reset the cycle count after transitioning to STOP state
@@ -412,7 +417,9 @@ void loop() {
         case State::MAINTENANCE:
             Serial.println("Currently in MAINTENANCE state");
             strcpy(text1, "MAINTENANCE");
+            led_value = 3;
             break;
     }
     controlPanel.setDisplayText(text1);
+    controlPanel.set_led(led_value);
 }

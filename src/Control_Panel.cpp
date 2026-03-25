@@ -198,4 +198,31 @@ void IRAM_ATTR ControlPanel::inputISR() {
     }
 }
 
-
+void ControlPanel::set_led(uint8_t led_value){
+    if(led_value==0){ //if state=stationary
+        _normal_extender.write_stage(N_EXT_PIN_DISP_LED, true);
+        _normal_extender.write_stage(N_EXT_PIN_STOP_LED, true);
+        _normal_extender.write_stage(N_EXT_PIN_RUNNING_LED, false);
+        _normal_extender.write_stage(N_EXT_PIN_E_STOP_LED, false);
+    }
+    else if(led_value==1){ //if state=normal
+        _normal_extender.write_stage(N_EXT_PIN_DISP_LED, true);
+        _normal_extender.write_stage(N_EXT_PIN_STOP_LED, false);
+        _normal_extender.write_stage(N_EXT_PIN_RUNNING_LED, true);
+        _normal_extender.write_stage(N_EXT_PIN_E_STOP_LED, false);
+    }
+    else if(led_value==2){ //if state=ESTOP
+        _normal_extender.write_stage(N_EXT_PIN_DISP_LED, false);
+        _normal_extender.write_stage(N_EXT_PIN_STOP_LED, false);
+        _normal_extender.write_stage(N_EXT_PIN_RUNNING_LED, false);
+        _normal_extender.write_stage(N_EXT_PIN_E_STOP_LED, true);
+    }
+    else if(led_value==3){ //if state=Maintenance
+        _normal_extender.write_stage(N_EXT_PIN_DISP_LED, true);
+        _normal_extender.write_stage(N_EXT_PIN_STOP_LED, false);
+        _normal_extender.write_stage(N_EXT_PIN_RUNNING_LED, false);
+        _normal_extender.write_stage(N_EXT_PIN_E_STOP_LED, false);
+    }
+    _normal_extender.commit();
+    _normal_extender.read();
+}

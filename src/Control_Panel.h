@@ -97,6 +97,7 @@ class ControlPanel {
         bool setResetHoldTime(uint16_t time_ms); // This will set the amount of time the reset button needs to be held down to trigger the reset callback
         //TODO: handle LED outputs
         void inputISR(); // This will be called when inputs change state, it will update the state variable and call the user input callback if set 
+        void set_led(uint8_t led_value);
 
     private:
         DFRobot_RGBLCD1602 _lcd{RGB_ADD, 16, 2, &Wire, LCD_ADD};
