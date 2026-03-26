@@ -206,7 +206,7 @@ void ControlPanel::set_led(uint8_t led_value){
         _normal_extender.write_stage(N_EXT_PIN_E_STOP_LED, false);
     }
     else if(led_value==1){ //if state=normal
-        _normal_extender.write_stage(N_EXT_PIN_DISP_LED, true);
+        _normal_extender.write_stage(N_EXT_PIN_DISP_LED, false);
         _normal_extender.write_stage(N_EXT_PIN_STOP_LED, false);
         _normal_extender.write_stage(N_EXT_PIN_RUNNING_LED, true);
         _normal_extender.write_stage(N_EXT_PIN_E_STOP_LED, false);
@@ -224,5 +224,4 @@ void ControlPanel::set_led(uint8_t led_value){
         _normal_extender.write_stage(N_EXT_PIN_E_STOP_LED, false);
     }
     _normal_extender.commit();
-    _normal_extender.read();
 }

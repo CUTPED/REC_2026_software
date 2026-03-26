@@ -177,7 +177,6 @@ void normalRideCycle(unsigned long timer_value){
     secondary_motor_rpm_value = MAX_SECONDARY_AXIS_RPM;
 }
 
-//TODO: add a way to compute the early_stop_ratio based on where the lift is when we press ride stop.
 float early_stop_ratio = 1.0f; // This will be a value between 0 and 1 that represents how far through the ride cycle we are when we press the stop button, it can be used to scale down the target speeds/positions during the spin down phase to create a smoother stop if we stop early in the ride cycle
 void spinDownCycle(unsigned long timer_value){ //early_stop_ratio represents where the motor was when we pressed ride stop.
     // This function will be called during the spin down phase of the ride cycle, it should ramp down the motors to 0 over the course of the spin down time
@@ -256,8 +255,6 @@ void IRAM_ATTR reset_isr(){
 }
 
 void IRAM_ATTR input_isr(uint16_t buttonData){
-    // TODO: Move state_switching logic to the callbacks (post and input are the only ones that should change to a state other than estop)
-
     if(current_state == State::ESTOP){
         //do nothing since there is no escape outside of the reset callback defined elsewhere
         estop_isr(); // this is reduntant but you know its good in case athe shutdown pin is not set propererly or smth 
@@ -373,47 +370,34 @@ void setup() {
 
 void loop() {
     // TODO: Implement safety checks that can pull the state into ESTOP (Current monitoring, diag pins, etc.)
-    // TODO: Set LEDs according to the state using the control panel class.
-
+    
     switch (current_state) {
         case State::STATIONARY:
             Serial.println("Currently in STATIONARY state");
             strcpy(text1, "STATIONARY");
             led_value = 0;
-
-            // if (dispatch_pressed) {
-            //     current_state = State::NORMAL;
-            //     Serial.println("Transitioning to NORMAL state");
-            //     //restart the ride cycle timer
-            //     timerRestart(ride_cycle_timer); 
-            //     timerAlarm(ride_cycle_timer, RIDE_CYCLE_TIME * 1000, false, 0); // Set the timer to trigger at the end of every ride cycle and not auto-reload
-            //     timerStart(ride_cycle_timer); 
-            // }
             break;
+
         case State::NORMAL:
             Serial.println("Currently in NORMAL state");
             strcpy(text1, "NORMAL");
             led_value = 1;
-            // if(!rideCycleHandler(timerRead(ride_cycle_timer))){ // This checks if the ride cycle timer has reached the end of the ride cycle, and if so, it will transition back to STOP state. This is a non-blocking way to handle the ride cycle timing.
-            //     current_state = State::STOP;
-            //     Serial.println("Ride cycle ended, transitioning back to STOP state");
-            // }
+            rideCycleHandler(timerRead(ride_cycle_timer)); // This will update the motor targets according to where we are in the ride cycle, it needs to be called frequently to ensure smooth updates to the motor targets, calling it in loop should be sufficient since it just checks the timer value and updates the targets accordingly
             break;
+
+        case State::STOPPING:
+            Serial.println("Currently in STOPPING state");
+            strcpy(text1, "STOPPING");
+            led_value = 1;
+            spinDownCycle(timerRead(ride_cycle_timer)); // This will update the motor targets according to where we are in the spin down phase, it needs to be called frequently to ensure smooth updates to the motor targets, calling it in loop should be sufficient since it just checks the timer value and updates the targets accordingly
+            break;
+
         case State::ESTOP:
             Serial.println("Currently in ESTOP state");
             strcpy(text1, "ESTOP");
             led_value = 2;
-            //analogWrite(ESTOP_LED_PIN, 50); // Turn on the ESTOP LED 
-            // if (reset_cycles > RESET_MIN_CYCLES){ // This is the amount of time the button must be held divided by the loop delay time (+10 for the debounce delay) to determine how many cycles the button needs to be held for
-            //     reset_cycles = 0; // Reset the cycle count after transitioning to STOP state
-            //     if(POST()){
-            //         current_state = State::STOP;
-            //         Serial.println("Transitioning to STOP state");
-            //     }else{
-            //         Serial.println("POST failed, remaining in ESTOP state");
-            //     }
-            // }
             break;
+
         case State::MAINTENANCE:
             Serial.println("Currently in MAINTENANCE state");
             strcpy(text1, "MAINTENANCE");
