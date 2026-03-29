@@ -23,6 +23,7 @@ class MotorPID {
         void disable(); // Disables the motor (sets enable pin low)
         float getPos();
         float getRPM();
+        void setPWM(int num);
         volatile float _currentPWM = 0.0f; // Current PWM value being sent to the motor (negative means pwming pin 2)
         int _raw_count = 0;
     private:

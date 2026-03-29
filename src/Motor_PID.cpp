@@ -219,3 +219,8 @@ float MotorPID::getRPM() {
     float rpm_value = ((_raw_count - _last_raw_count) / _countsPerRev) * (60000.0f / _timestep_ms); // Convert count difference to RPM
     return rpm_value;
 }
+
+void MotorPID::setPWM(int num) {
+    ledc_set_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_1, num);
+    ledc_set_duty(LEDC_HIGH_SPEED_MODE, _ledc_channel_2, 0);
+}
