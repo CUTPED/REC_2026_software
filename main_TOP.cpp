@@ -68,6 +68,13 @@ MotorPID Motor1;
 MotorPID Motor2;
 MotorPID Motor3;
 
+void IRAM_ATTR estop_isr(){
+    current_state = State::ESTOP; // Transition to ESTOP state immediately when the E-stop button is pressed
+    Motor1.disable();
+    Motor2.disable();
+    Motor3.disable();
+}
+
 float secondary_motors_target = 0.0f;
 
 // This will be incremented in the heartbeat timer callback and set to 0 whenever a heartbeat is received from the ESP_H.
@@ -85,7 +92,7 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_e
         //error_code logic
     }else if(rx_msg.header.id == 0x100){ // This is a heartbeat message
         current_state = static_cast<State>(rx_msg.buffer[0]); // Update our current state based on the heartbeat message from the ESP_H, this will help ensure we're in the correct state after a reset and can also be used to detect if we missed a state transition
-        if (current_state == STATE::NORMAL){
+        if (current_state == State::NORMAL){
             Motor1.enable();
             Motor2.enable();
             Motor3.enable();
@@ -140,20 +147,13 @@ void IRAM_ATTR heartbeat_timer_callback(){
     }
 
     heartbeat_data[0] = static_cast<uint8_t>(current_state); // Send the current state in the heartbeat message, you can also add other data here if needed
-    heartbeat_data[1] = (uint8_t)secondary_motor_rpm_value; 
+    heartbeat_data[1] = (uint8_t)secondary_motors_target; 
     heartbeat_data[2] = 0; // These bits will be used in maintainence mode
     heartbeat_data[3] = 0; 
     memcpy(heartbeat_msg.buffer, (uint8_t*)heartbeat_data, sizeof(heartbeat_data)); // Update the data field of the CAN message with the current value of x
     ESP_ERROR_CHECK(twai_node_transmit(twai_handle, &heartbeat_msg,0));
 
     pid_update_counter++;
-}
-
-void IRAM_ATTR estop_isr(){
-    current_state = State::ESTOP; // Transition to ESTOP state immediately when the E-stop button is pressed
-    Motor1.disable();
-    Motor2.disable();
-    Motor3.disable();
 }
 
 //TODO: Maintainence Mode functions theses should be short just make sure that when it gets a CAN message to move a motor it does that

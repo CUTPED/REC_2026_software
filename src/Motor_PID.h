@@ -22,6 +22,9 @@ class MotorPID {
         void enable(); // Enables the motor (sets enable pin high)
         void disable(); // Disables the motor (sets enable pin low)
         float getPos();
+        float getRPM();
+        volatile float _currentPWM = 0.0f; // Current PWM value being sent to the motor (negative means pwming pin 2)
+        int _raw_count = 0;
     private:
         volatile float _Kp;
         volatile float _Ki;
@@ -38,11 +41,9 @@ class MotorPID {
 
         volatile float _currentRPM;
         int _last_raw_count = 0;
-        int _raw_count = 0;
         volatile float _prev_err = 0.0f; // error term for PID
         volatile float _err = 0.0f; // error term for PID
         volatile float _Derr = 0.0f; // change in error for PID
-        volatile float _currentPWM = 0.0f; // Current PWM value being sent to the motor (negative means pwming pin 2)
 
         pcnt_unit_handle_t _pcnt_unit = NULL;
         pcnt_channel_handle_t _pcnt_chan0 = NULL;

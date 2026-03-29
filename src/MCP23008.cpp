@@ -11,7 +11,7 @@ bool MCP23008::init(SemaphoreHandle_t i2cMutex, uint8_t interrupt_pin, uint8_t a
 
     // Set up interrupt pin
     pinMode(_interrupt_pin, PIN_TYPE::PIN_PULLUP);
-    
+
     // Create a background task for handling I2C communication
     xTaskCreatePinnedToCore(
         backgroundTaskTrampoline, // Task function

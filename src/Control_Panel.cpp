@@ -11,7 +11,7 @@ bool ControlPanel::init() {
     Wire.begin(SDA, SCL,400000); // Fast Mode
     
     // LCD
-    _lcd.init();
+    // _lcd.init();
     //We can set rgb if we want i think idk if the lcd we have can do that??
     //We can't do rgb but we can choose brightness and the blue, gray or green
 
@@ -30,9 +30,11 @@ bool ControlPanel::init() {
     _normal_extender.pinMode_stage(N_EXT_PIN_E_STOP_LED, PIN_TYPE::PIN_OUTPUT);
 
     _normal_extender.pinMode_stage(N_EXT_PIN_DISP_BTN, PIN_TYPE::PIN_PULLUP_INTERRUPT);
-    _normal_extender.pinMode_stage(N_EXT_PIN_DISP_BTN_2, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+    _normal_extender.pinMode_stage(N_EXT_PIN_DISP_BTN_2, PIN_TYPE::PIN_INTERRUPT);
     _normal_extender.pinMode_stage(N_EXT_PIN_RESET_BTN, PIN_TYPE::PIN_PULLUP_INTERRUPT);
     _normal_extender.pinMode_stage(N_EXT_PIN_DISP_LOCK, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+
+    _normal_extender.commit();
 
     _maintanence_extender.setUpdateCallback(maintenanceCallbackTrampoline, this);
 
@@ -45,6 +47,9 @@ bool ControlPanel::init() {
     _maintanence_extender.pinMode_stage(M_EXT_OFF_MODE, PIN_TYPE::PIN_PULLUP_INTERRUPT);
     _maintanence_extender.pinMode_stage(M_EXT_NORMAL_MODE, PIN_TYPE::PIN_PULLUP_INTERRUPT);
 
+    _maintanence_extender.commit();
+    
+
     pinMode(LIFT_LIMIT_LOW, INPUT_PULLUP);
     pinMode(LIFT_LIMIT_HIGH, INPUT_PULLUP);
     pinMode(STOP_BTN, INPUT_PULLUP);
@@ -52,14 +57,20 @@ bool ControlPanel::init() {
 
     attachInterruptArg(digitalPinToInterrupt(LIFT_LIMIT_LOW), inputISRtrampoline, this, CHANGE);
     attachInterruptArg(digitalPinToInterrupt(LIFT_LIMIT_HIGH), inputISRtrampoline, this, CHANGE);
-    attachInterruptArg(digitalPinToInterrupt(STOP_BTN), inputISRtrampoline, this, FALLING);
-    attachInterruptArg(digitalPinToInterrupt(POWER_MONITOR_PIN), inputISRtrampoline, this, FALLING);
+    attachInterruptArg(digitalPinToInterrupt(STOP_BTN), inputISRtrampoline, this, CHANGE);
+    attachInterruptArg(digitalPinToInterrupt(POWER_MONITOR_PIN), inputISRtrampoline, this, CHANGE);
 
     // Reset timer
     _resetTimer = timerBegin(1000000); 
     timerAttachInterruptArg(_resetTimer, resetTimerTrampoline, this); 
     timerAlarm(_resetTimer, _resetHoldTime * 1000, false, 0); 
     timerStop(_resetTimer);
+
+    uint8_t update_1 = _normal_extender.read();
+    uint8_t update_2 = _maintanence_extender.read();
+    inputISR(); // Read the initial state of the direct inputs`
+    normalExtenderCallback(update_1);
+    maintenanceExtenderCallback(update_2);
     return true;
 }
 
@@ -187,12 +198,11 @@ void IRAM_ATTR ControlPanel::inputISR() {
     new_state |= digitalRead(LIFT_LIMIT_HIGH) << 1; // Bit 1: High limit
     new_state |= digitalRead(STOP_BTN) << 2; // Bit 2: Stop button
     new_state |= digitalRead(POWER_MONITOR_PIN) << 3; // Bit 3: Power state (1 for power, 0 for no power)
-
     portENTER_CRITICAL(&_stateMux);
     _prevState = _state;
-    _state = (_state & 0xFFF0) | (new_state & 0x00F); // Update bits 0-3 with the new input state, keep extender states unchanged
+    _state = (_state & 0xFFF0) | (new_state & 0x000F); // Update bits 0-3 with the new input state, keep extender states unchanged
     portEXIT_CRITICAL(&_stateMux);
-
+    
     if(_userInputCallback){
         _userInputCallback(_state);
     }
