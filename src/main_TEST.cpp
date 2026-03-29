@@ -177,9 +177,9 @@
 #define LIFT_MOTOR_PWM_2 33
  
 #define LIFT_MOTOR_CPR 7974.4
-#define LIFT_MOTOR_KP 0.005f
-#define LIFT_MOTOR_KI 0.000f
-#define LIFT_MOTOR_KD 0.00f
+#define LIFT_MOTOR_KP 0.05f
+#define LIFT_MOTOR_KI 0.00f
+#define LIFT_MOTOR_KD 0.0f
 
 #define CENTER_MOTOR_ENCODER_A 36
 #define CENTER_MOTOR_ENCODER_B 39
@@ -196,17 +196,18 @@
 // MotorPID Motor1;
 // MotorPID Motor2;
 // MotorPID Motor3;
-//MotorPID LiftMotor;
-//volatile float lift_motor_goal_position = 0.0f; // Target position for the lift motor in degrees /4
-// MotorPID CenterMotor;
-// volatile float center_motor_goal_speed = 50.0f;
+MotorPID LiftMotor;
+volatile float lift_motor_goal_position = 0.0f; // Target position for the lift motor in degrees /4
+MotorPID CenterMotor;
+volatile float center_motor_goal_speed = 50.0f;
 #include "Control_Panel.h"
 ControlPanel controlPanel;
 // #include "MCP23008.h"
 
 #include "Motor_PID.h"
 
-MotorPID LiftMotor;
+// MotorPID LiftMotor;
+// float lift_motor_goal_position = 0.0f; // Target position for the lift motor in degrees
 
 uint16_t x;
 volatile bool flag_1 = false;
@@ -230,8 +231,8 @@ void loop() {
 //   Motor2.update();
 //   Motor3.update();
 // CenterMotor.update();
-//   LiftMotor.update();
-//   LiftMotor.setGoalPos(lift_motor_goal_position);
+  // LiftMotor.update();
+  // LiftMotor.setGoalPos(lift_motor_goal_position);
   // CenterMotor.setGoalVelo(-60.0f);
   // Serial.print("Center Motor Speed: "); Serial.println(CenterMotor.getRPM());
   // Serial.print("PWM Output: "); Serial.println(CenterMotor._currentPWM);
@@ -245,6 +246,12 @@ void loop() {
     Serial.println(); // Add a newline at the end
     flag_1 = false;
   }
+  LiftMotor.update();
+  LiftMotor.setGoalPos(lift_motor_goal_position);
+  lift_motor_goal_position += 0.55f;
+  if (lift_motor_goal_position > 1100.0f) lift_motor_goal_position = 1100.0f; 
+  Serial.print("Lift Motor Position: "); Serial.println(LiftMotor.getPos());
+  Serial.print("PWM Output: "); Serial.println(LiftMotor._currentPWM);
   delay(10);
 }
  
@@ -254,42 +261,93 @@ void setup(){
   Serial.begin(115200);
   controlPanel.init();
   controlPanel.setInputCallback(in_isr);
-  liftMotor.init(LIFT_MOTOR_ENCODER_A, LIFT_MOTOR_ENCODER_B, LIFT_MOTOR_PWM_1, LIFT_MOTOR_PWM_2, ENABLE_PIN, LIFT_MOTOR_CPR, LEDC_CHANNEL_6, LEDC_CHANNEL_7, LIFT_MOTOR_KP, LIFT_MOTOR_KI, LIFT_MOTOR_KD, 10);
-  liftMotor.enable();
-  // i2cMutex = xSemaphoreCreateMutex();
-  // mcp.init(i2cMutex, 17, 0x20); 
-  // mcp.pinMode_stage(0, PIN_TYPE::PIN_OUTPUT);
-  // mcp.pinMode_stage(1, PIN_TYPE::PIN_OUTPUT);
-  // mcp.pinMode_stage(2, PIN_TYPE::PIN_OUTPUT);
-  // mcp.pinMode_stage(3, PIN_TYPE::PIN_OUTPUT);
-  // mcp.pinMode_stage(4, PIN_TYPE::PIN_PULLUP_INTERRUPT);
-  // mcp.pinMode_stage(5, PIN_TYPE::PIN_PULLUP_INTERRUPT);
-  // mcp.pinMode_stage(6, PIN_TYPE::PIN_PULLUP_INTERRUPT);
-  // mcp.pinMode_stage(7, PIN_TYPE::PIN_PULLUP_INTERRUPT);
-  // mcp.commit(true); 
-  // mcp.setUpdateCallback(in_isr); // Set the interrupt callback function
-
-
-//   Motor1.init(MOTOR_1_ENCODER_B, MOTOR_1_ENCODER_A, MOTOR_1_PWM_2, MOTOR_1_PWM_1, ENABLE_PIN, MOTOR_1_CPR, LEDC_CHANNEL_0, LEDC_CHANNEL_1, MOTOR_1_KP, MOTOR_1_KI, MOTOR_1_KD, 10);
-//   Motor2.init(MOTOR_2_ENCODER_B, MOTOR_2_ENCODER_A, MOTOR_2_PWM_2, MOTOR_2_PWM_1, ENABLE_PIN, MOTOR_2_CPR, LEDC_CHANNEL_2, LEDC_CHANNEL_3, MOTOR_2_KP, MOTOR_2_KI, MOTOR_2_KD, 10);
-//   Motor3.init(MOTOR_3_ENCODER_B, MOTOR_3_ENCODER_A, MOTOR_3_PWM_2, MOTOR_3_PWM_1, ENABLE_PIN, MOTOR_3_CPR, LEDC_CHANNEL_4, LEDC_CHANNEL_5, MOTOR_3_KP, MOTOR_3_KI, MOTOR_3_KD, 10);
-//   LiftMotor.init(LIFT_MOTOR_ENCODER_A, LIFT_MOTOR_ENCODER_B, LIFT_MOTOR_PWM_1, LIFT_MOTOR_PWM_2, ENABLE_PIN, LIFT_MOTOR_CPR, LEDC_CHANNEL_6, LEDC_CHANNEL_7, LIFT_MOTOR_KP, LIFT_MOTOR_KI, LIFT_MOTOR_KD, 10);
-  // CenterMotor.init(CENTER_MOTOR_ENCODER_B, CENTER_MOTOR_ENCODER_A, CENTER_MOTOR_PWM_2, CENTER_MOTOR_PWM_1, ENABLE_PIN, CENTER_MOTOR_CPR, LEDC_CHANNEL_6, LEDC_CHANNEL_7, CENTER_MOTOR_KP, CENTER_MOTOR_KI, CENTER_MOTOR_KD, 10);
-//   pinMode(LIFT_MOTOR_PWM_1, OUTPUT);
-//   pinMode(LIFT_MOTOR_PWM_2, OUTPUT);
-//   digitalWrite(LIFT_MOTOR_PWM_2, LOW);
- 
-//   Motor1.setGoalVelo(135.0f);
-//   Motor2.setGoaslVelo(135.0f);
-//   Motor3.setGoalVelo(135.0f);
-    // LiftMotor.setGoalPos(-100.0f); // Just for testing, set a goal position of 360 degrees (1 full rotation) for the lift motor
- 
-//   Motor1.enable();
-//   Motor2.enable();
-//   Motor3.enable();
-//   LiftMotor.enable();
-    //  CenterMotor.enable();
+  LiftMotor.init(LIFT_MOTOR_ENCODER_A, LIFT_MOTOR_ENCODER_B, LIFT_MOTOR_PWM_1, LIFT_MOTOR_PWM_2, ENABLE_PIN, LIFT_MOTOR_CPR, LEDC_CHANNEL_6, LEDC_CHANNEL_7, LIFT_MOTOR_KP, LIFT_MOTOR_KI, LIFT_MOTOR_KD, 10);
+  LiftMotor.enable();
+  controlPanel.setDisplayText("TESTING");
 }
+
+
+//   // i2cMutex = xSemaphoreCreateMutex();
+//   // mcp.init(i2cMutex, 17, 0x20); 
+//   // mcp.pinMode_stage(0, PIN_TYPE::PIN_OUTPUT);
+//   // mcp.pinMode_stage(1, PIN_TYPE::PIN_OUTPUT);
+//   // mcp.pinMode_stage(2, PIN_TYPE::PIN_OUTPUT);
+//   // mcp.pinMode_stage(3, PIN_TYPE::PIN_OUTPUT);
+//   // mcp.pinMode_stage(4, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+//   // mcp.pinMode_stage(5, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+//   // mcp.pinMode_stage(6, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+//   // mcp.pinMode_stage(7, PIN_TYPE::PIN_PULLUP_INTERRUPT);
+//   // mcp.commit(true); 
+//   // mcp.setUpdateCallback(in_isr); // Set the interrupt callback function
+
+
+// //   Motor1.init(MOTOR_1_ENCODER_B, MOTOR_1_ENCODER_A, MOTOR_1_PWM_2, MOTOR_1_PWM_1, ENABLE_PIN, MOTOR_1_CPR, LEDC_CHANNEL_0, LEDC_CHANNEL_1, MOTOR_1_KP, MOTOR_1_KI, MOTOR_1_KD, 10);
+// //   Motor2.init(MOTOR_2_ENCODER_B, MOTOR_2_ENCODER_A, MOTOR_2_PWM_2, MOTOR_2_PWM_1, ENABLE_PIN, MOTOR_2_CPR, LEDC_CHANNEL_2, LEDC_CHANNEL_3, MOTOR_2_KP, MOTOR_2_KI, MOTOR_2_KD, 10);
+// //   Motor3.init(MOTOR_3_ENCODER_B, MOTOR_3_ENCODER_A, MOTOR_3_PWM_2, MOTOR_3_PWM_1, ENABLE_PIN, MOTOR_3_CPR, LEDC_CHANNEL_4, LEDC_CHANNEL_5, MOTOR_3_KP, MOTOR_3_KI, MOTOR_3_KD, 10);
+// //   LiftMotor.init(LIFT_MOTOR_ENCODER_A, LIFT_MOTOR_ENCODER_B, LIFT_MOTOR_PWM_1, LIFT_MOTOR_PWM_2, ENABLE_PIN, LIFT_MOTOR_CPR, LEDC_CHANNEL_6, LEDC_CHANNEL_7, LIFT_MOTOR_KP, LIFT_MOTOR_KI, LIFT_MOTOR_KD, 10);
+//   // CenterMotor.init(CENTER_MOTOR_ENCODER_B, CENTER_MOTOR_ENCODER_A, CENTER_MOTOR_PWM_2, CENTER_MOTOR_PWM_1, ENABLE_PIN, CENTER_MOTOR_CPR, LEDC_CHANNEL_6, LEDC_CHANNEL_7, CENTER_MOTOR_KP, CENTER_MOTOR_KI, CENTER_MOTOR_KD, 10);
+// //   pinMode(LIFT_MOTOR_PWM_1, OUTPUT);
+// //   pinMode(LIFT_MOTOR_PWM_2, OUTPUT);
+// //   digitalWrite(LIFT_MOTOR_PWM_2, LOW);
+ 
+// //   Motor1.setGoalVelo(135.0f);
+// //   Motor2.setGoaslVelo(135.0f);
+// //   Motor3.setGoalVelo(135.0f);
+//     // LiftMotor.setGoalPos(-100.0f); // Just for testing, set a goal position of 360 degrees (1 full rotation) for the lift motor
+ 
+// //   Motor1.enable();
+// //   Motor2.enable();
+// //   Motor3.enable();
+// //   LiftMotor.enable();
+//     //  CenterMotor.enable();
+// }
+
+
+// #include <Wire.h>
+ 
+// void setup() {
+//   pinMode(SHUTDOWN_PIN, OUTPUT);
+//   digitalWrite(SHUTDOWN_PIN, HIGH); 
+//   Wire.begin();
+//   Serial.begin(115200);
+//   Serial.println("\nI2C Scanner");
+// }
+ 
+// void loop() {
+//   byte error, address;
+//   int nDevices;
+//   Serial.println("Scanning...");
+//   nDevices = 0;
+//   for(address = 1; address < 127; address++ ) {
+//     Wire.beginTransmission(address);
+//     error = Wire.endTransmission();
+//     if (error == 0) {
+//       Serial.print("I2C device found at address 0x");
+//       if (address<16) {
+//         Serial.print("0");
+//       }
+//       Serial.println(address,HEX);
+//       nDevices++;
+//     }
+//     else if (error==4) {
+//       Serial.print("Unknow error at address 0x");
+//       if (address<16) {
+//         Serial.print("0");
+//       }
+//       Serial.println(address,HEX);
+//     }    
+//   }
+//   if (nDevices == 0) {
+//     Serial.println("No I2C devices found\n");
+//   }
+//   else {
+//     Serial.println("done\n");
+//   }
+//   delay(5000);          
+// }
+
+
+
 // void callback(uint8_t newState){
 //     Serial.print("Input ISR triggered with new state: ");
 //     Serial.println(newState, BIN);

@@ -151,8 +151,8 @@ IRAM_ATTR void MotorPID::update() {
         _prev_err = _err;
         _err = _targetPosition - position_value;
         _Derr = _err - _prev_err;
-        _integral += _err * _Ki * (_timestep_ms / 1000.0f);
-        _currentPWM += _Kp * _err + _integral + (_Kd * _Derr)/(_timestep_ms / 1000.0f);
+        _integral += _err * (_timestep_ms / 1000.0f);
+        _currentPWM = _Kp * _err + _Ki * _integral + (_Kd * _Derr)/(_timestep_ms / 1000.0f);
         _currentPWM = _currentPWM < -100.0f ? -100.0f : (_currentPWM > 100.0f ? 100.0f : _currentPWM); // Constrain PWM to valid range
         // if (_err < 5.0f && _err > -5.0f) _currentPWM = 0; // If we're within 1.25 degrees of the target, just stop the motor to prevent jitter. You can adjust this threshold as needed.
         // if (_currentPWM > 0.0f && _currentPWM < 25.0f)       _currentPWM = 25.0f;

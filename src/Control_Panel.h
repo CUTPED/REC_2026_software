@@ -15,7 +15,7 @@
 #define N_EXT_ADD 0x20
 #define M_EXT_ADD 0x24
 #define LCD_ADD 0x3E
-#define RGB_ADD 0x7C
+#define RGB_ADD 0x6B
 
 // Pin Assignments
 

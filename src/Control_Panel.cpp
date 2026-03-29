@@ -8,10 +8,11 @@ bool ControlPanel::init() {
     }
 
     // Wire 
-    Wire.begin(SDA, SCL,400000); // Fast Mode
+    Wire.begin(SDA, SCL); // Fast Mode
     
     // LCD
-    // _lcd.init();
+    _lcd.init();
+    _lcd.setPWM(_lcd.REG_ONLY,255);
     //We can set rgb if we want i think idk if the lcd we have can do that??
     //We can't do rgb but we can choose brightness and the blue, gray or green
 
