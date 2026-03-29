@@ -116,9 +116,9 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_e
     }
 
     // for(int i = 0; i < rx_msg.buffer_len; i++){
-    //   Serial.printf("%d ", rx_msg.buffer[i]);
+    //   //Serial.printf("%d ", rx_msg.buffer[i]);
     // }
-    // Serial.println();
+    // //Serial.println();
   }
   return true;
 }
@@ -198,12 +198,13 @@ void rideCycleHandler(unsigned long timer_value) {
 void POST_task(void* pvParameters){
   while(true){
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // The callback for reset should notify this task
+    //Serial.println("Starting POST");
     current_state = State::POST;
     // return power
     digitalWrite(SHUTDOWN_PIN, HIGH); // Pull the shutdown pin high to supply power to the ride
-    controlPanel.setDisplayText("POST","Powering Up");
-    vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay 1s to allow ESP_H to boot
-    controlPanel.setDisplayText("POST","Sending Setup");
+    //Serial.println("Starting POST");
+    // controlPanel.setDisplayText("POST","Sending Setup");
+    vTaskDelay(3000 / portTICK_PERIOD_MS); // Delay 3s to allow ESP_H to boot
 
     uint8_t setup_data[4] = {2,0,0,0}; 
     twai_frame_t setup_msg = {
@@ -218,9 +219,9 @@ void POST_task(void* pvParameters){
     if(ulTaskNotifyTake(pdTRUE, 2000 / portTICK_PERIOD_MS) == 0){ // The callback for reset should notify this task
         // If we don't receive a notification within 2 seconds, assume the ESP_H didn't boot properly and stay in ESTOP
         estop_isr();
-        controlPanel.setDisplayText("ESTOP","No Handshake");
+        // controlPanel.setDisplayText("ESTOP","No Handshake");
     }else{ 
-        controlPanel.setDisplayText("POST","Final Checks");
+        // controlPanel.setDisplayText("POST","Final Checks");
         // Start the heartbeat properly
         missed_heartbeats = 0; // Reset missed heartbeats in case we were in ESTOP due to connection issues
         delayMicroseconds(500); //phase offset to avoid all the messages coming at once and overwhelming the bus
@@ -230,15 +231,17 @@ void POST_task(void* pvParameters){
         //TODO: add the final list of motor checks we need (includeing ride off = 0)
 
 
-        bool maintainence_mode = !(controlPanel.getState() & (1 << 14));
-        bool normal_mode = !(controlPanel.getState() & (1 << 15));
-        if(maintainence_mode && !normal_mode){
-            current_state = State::MAINTENANCE;
-        }else if(normal_mode && !maintainence_mode){  
-            current_state = State::STATIONARY; 
-        }else{
-            estop_isr();
-        }
+        current_state = State::STATIONARY; // Transition to stationary state after POST, we can only transition to normal mode from stationary to ensure we go through the dispatch process
+
+        // bool maintainence_mode = !(controlPanel.getState() & (1 << 14));
+        // bool normal_mode = !(controlPanel.getState() & (1 << 15));
+        // if(maintainence_mode && !normal_mode){
+        //     current_state = State::MAINTENANCE;
+        // }else if(normal_mode && !maintainence_mode){  
+        //     current_state = State::STATIONARY; 
+        // }else{
+        //     estop_isr();
+        // }
     }
   }
 }
@@ -255,6 +258,7 @@ void IRAM_ATTR reset_isr(){
 }
 
 void IRAM_ATTR input_isr(uint16_t buttonData){
+    controlPanel.setDisplayText("Input","Received"); 
     if(current_state == State::ESTOP){
         //do nothing since there is no escape outside of the reset callback defined elsewhere
         estop_isr(); // this is reduntant but you know its good in case athe shutdown pin is not set propererly or smth 
@@ -336,7 +340,7 @@ void IRAM_ATTR ride_event_isr(){
 //TODO: Maintainence Mode functions (This might become part of the input callback with a big if at the top)
 
 void setup() {
-    Serial.begin(115200);
+    //Serial.begin(115200);
     controlPanel.init();
     xTaskCreatePinnedToCore(
         POST_task, // Function to implement the task
@@ -366,6 +370,29 @@ void setup() {
     //Motor Initialization
     LiftMotor.init(LIFT_MOTOR_ENCODER_A, LIFT_MOTOR_ENCODER_B, LIFT_MOTOR_PWM_1, LIFT_MOTOR_PWM_2, ENABLE_PIN, LIFT_MOTOR_CPR, LEDC_CHANNEL_0,LEDC_CHANNEL_1, LIFT_MOTOR_KP, LIFT_MOTOR_KI, LIFT_MOTOR_KD, 10);
     Central_Axis_Motor.init(CENTER_MOTOR_ENCODER_A, CENTER_MOTOR_ENCODER_B, CENTER_MOTOR_PWM_1, CENTER_MOTOR_PWM_2, ENABLE_PIN, CENTRAL_AXIS_CPR, LEDC_CHANNEL_2, LEDC_CHANNEL_3, CENTRAL_AXIS_KP, CENTRAL_AXIS_KI, CENTRAL_AXIS_KD, 10);
+
+    pinMode(SHUTDOWN_PIN, OUTPUT);
+    digitalWrite(SHUTDOWN_PIN, LOW); 
+
+    twai_onchip_node_config_t twai_config = {
+    .io_cfg ={
+      .tx = GPIO_NUM_1, //Pin assignments for CAN TX and RX
+      .rx = GPIO_NUM_3,
+    },
+    .bit_timing = {
+      .bitrate = 500000, // Set CAN bus bitrate to 500 kbps
+    }, 
+    .tx_queue_depth = 5, // This isn't strictly necessary for basic operation, but it allows for buffering multiple messages if needed
+  };
+  twai_event_callbacks_t twai_callbacks = {
+    .on_rx_done = twai_rx_cb, // Call the twai_rx_cb function whenever a CAN message is received
+  };
+
+  //Start CAN Node
+  ESP_ERROR_CHECK(twai_new_node_onchip( &twai_config,&twai_handle));
+  ESP_ERROR_CHECK(twai_node_register_event_callbacks(twai_handle, &twai_callbacks,NULL));
+  ESP_ERROR_CHECK(twai_node_enable(twai_handle));
+
 }
 
 void loop() {
@@ -373,37 +400,37 @@ void loop() {
     
     switch (current_state) {
         case State::STATIONARY:
-            Serial.println("Currently in STATIONARY state");
+            // //Serial.println("Currently in STATIONARY state");
             strcpy(text1, "STATIONARY");
             led_value = 0;
             break;
 
         case State::NORMAL:
-            Serial.println("Currently in NORMAL state");
+            // //Serial.println("Currently in NORMAL state");
             strcpy(text1, "NORMAL");
             led_value = 1;
             rideCycleHandler(timerRead(ride_cycle_timer)); // This will update the motor targets according to where we are in the ride cycle, it needs to be called frequently to ensure smooth updates to the motor targets, calling it in loop should be sufficient since it just checks the timer value and updates the targets accordingly
             break;
 
         case State::STOPPING:
-            Serial.println("Currently in STOPPING state");
+            // //Serial.println("Currently in STOPPING state");
             strcpy(text1, "STOPPING");
             led_value = 1;
             spinDownCycle(timerRead(ride_cycle_timer)); // This will update the motor targets according to where we are in the spin down phase, it needs to be called frequently to ensure smooth updates to the motor targets, calling it in loop should be sufficient since it just checks the timer value and updates the targets accordingly
             break;
 
         case State::ESTOP:
-            Serial.println("Currently in ESTOP state");
+            // //Serial.println("Currently in ESTOP state");
             strcpy(text1, "ESTOP");
             led_value = 2;
             break;
 
         case State::MAINTENANCE:
-            Serial.println("Currently in MAINTENANCE state");
+            // //Serial.println("Currently in MAINTENANCE state");
             strcpy(text1, "MAINTENANCE");
             led_value = 3;
             break;
     }
-    controlPanel.setDisplayText(text1);
+    // controlPanel.setDisplayText(text1);
     controlPanel.set_led(led_value);
 }

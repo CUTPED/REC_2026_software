@@ -117,9 +117,9 @@ static bool IRAM_ATTR twai_rx_cb(twai_node_handle_t handle, const twai_rx_done_e
         timerStart(heartbeat_timer); // Start the heartbeat timer to begin sending heartbeats and monitoring the connection to the ESP_H, we start it here because we want to wait until we receive the setup message back from the ESP_H before we start monitoring the connection
     }
     // for(int i = 0; i < rx_msg.buffer_len; i++){
-    //   Serial.printf("%d ", rx_msg.buffer[i]);
+    //   //Serial.printf("%d ", rx_msg.buffer[i]);
     // }
-    // Serial.println();
+    // //Serial.println();
   }
   return true;
 }
@@ -159,7 +159,7 @@ void IRAM_ATTR heartbeat_timer_callback(){
 //TODO: Maintainence Mode functions theses should be short just make sure that when it gets a CAN message to move a motor it does that
 
 void setup() {
-    Serial.begin(115200);
+    //Serial.begin(115200);
     heartbeat_timer = timerBegin(1000000); 
     timerAttachInterrupt(heartbeat_timer, heartbeat_timer_callback); // Attach the timer callback
     timerAlarm(heartbeat_timer, 1000, true, 0); // Set the timer to trigger every 1ms and auto-reload
@@ -173,7 +173,25 @@ void setup() {
     Motor1.init(MOTOR_1_ENCODER_A, MOTOR_1_ENCODER_B, MOTOR_1_PWM_1, MOTOR_1_PWM_2, ENABLE_PIN, MOTOR_1_CPR, LEDC_CHANNEL_0, LEDC_CHANNEL_1, MOTOR_1_KP, MOTOR_1_KI, MOTOR_1_KD, 10);
     Motor2.init(MOTOR_2_ENCODER_A, MOTOR_2_ENCODER_B, MOTOR_2_PWM_1, MOTOR_2_PWM_2, ENABLE_PIN, MOTOR_2_CPR, LEDC_CHANNEL_2, LEDC_CHANNEL_3, MOTOR_2_KP, MOTOR_2_KI, MOTOR_2_KD, 10);
     Motor3.init(MOTOR_3_ENCODER_A, MOTOR_3_ENCODER_B, MOTOR_3_PWM_1, MOTOR_3_PWM_2, ENABLE_PIN, MOTOR_3_CPR, LEDC_CHANNEL_4, LEDC_CHANNEL_5, MOTOR_3_KP, MOTOR_3_KI, MOTOR_3_KD, 10);
-    
+    twai_onchip_node_config_t twai_config = {
+    .io_cfg ={
+      .tx = GPIO_NUM_1, //Pin assignments for CAN TX and RX
+      .rx = GPIO_NUM_3,
+    },
+    .bit_timing = {
+      .bitrate = 500000, // Set CAN bus bitrate to 500 kbps
+    }, 
+    .tx_queue_depth = 5, // This isn't strictly necessary for basic operation, but it allows for buffering multiple messages if needed
+  };
+  twai_event_callbacks_t twai_callbacks = {
+    .on_rx_done = twai_rx_cb, // Call the twai_rx_cb function whenever a CAN message is received
+  };
+
+  //Start CAN Node
+  ESP_ERROR_CHECK(twai_new_node_onchip( &twai_config,&twai_handle));
+  ESP_ERROR_CHECK(twai_node_register_event_callbacks(twai_handle, &twai_callbacks,NULL));
+  ESP_ERROR_CHECK(twai_node_enable(twai_handle));
+
 }
 
 void loop() {
@@ -210,9 +228,9 @@ void loop() {
 // MCP23008 *mcp = nullptr; 
 
 // void updateCallback(uint8_t newState) {
-//     Serial.print("MCP23008 Interrupt! New state: ");
-//     for (int i = 7; i >= 0; i--) Serial.print((newState >> i) & 1);
-//     Serial.println();
+//     //Serial.print("MCP23008 Interrupt! New state: ");
+//     for (int i = 7; i >= 0; i--) //Serial.print((newState >> i) & 1);
+//     //Serial.println();
 //     if(!(newState & 0x02)){ // If the second bit is low, that means the button connected to that pin was pressed (assuming active-low with pull-up)
 //         mcp->write_stage(0, true); // Set the first bit high to turn on the LED connected to that pin
 //     }else{
@@ -227,7 +245,7 @@ void loop() {
 // }
 
 // void setup() {
-//     Serial.begin(115200);
+//     //Serial.begin(115200);
 //     Wire.begin(SDA, SCL,400000); // Initialize I2C with specified SDA, SCL pins and fast mode (400kHz)
 //     i2cMutex = xSemaphoreCreateMutex();
 //     mcp = new MCP23008(i2cMutex); // Initialize the MCP23008 instance with the I2C mutex
@@ -240,7 +258,7 @@ void loop() {
 // }
 
 // void loop(){
-//   Serial.println("Looping");
+//   //Serial.println("Looping");
 //   vTaskDelay(1000 / portTICK_PERIOD_MS);  
 // }
 
@@ -272,7 +290,7 @@ void loop() {
 #define GPIO 0x09
 void setup() {
   Wire.begin(SDA, SCL);
-  Serial.begin(115200);
+  //Serial.begin(115200);
   Wire.beginTransmission(EXTADD);
   Wire.write(IODIR);
   Wire.write(0x00);
@@ -284,12 +302,12 @@ void loop() {
   Wire.write(GPIO);
   Wire.write(0xff);
   Wire.endTransmission();
-  Serial.println("1");
+  //Serial.println("1");
   delay(1000);
   Wire.beginTransmission(EXTADD);
   Wire.write(GPIO);
   Wire.write(0x00);
   Wire.endTransmission();
-  Serial.println("0");
+  //Serial.println("0");
   delay(1000);
 }*/
